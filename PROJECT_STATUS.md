@@ -347,6 +347,7 @@ ECS 原启动/网关/证书文件均在 `/opt/atow`，主要容器为 `atow-app`
 | PC 保存结果时 WinError 17 | 曾在同目录 `os.replace` 出错，已对 Windows 错误 17 做 copy+unlink 兼容；具体文件系统原因未进一步确认，不要随意移除该兼容处理 |
 | Docker 向 readonly/tmpfs 的 `/tmp` 复制测试文件失败 | 改用 `docker exec -i` 将测试字节写入临时文件，不能据此判断业务上传失败 |
 | `docker exec` 用 root 打开 SQLite 失败 | 容器去掉了 DAC_OVERRIDE，数据库属 UID 10001；需要 `--user 10001:10001`，不要盲目放宽权限 |
+| 手机（OPPO Find X8 Ultra）流量下能开网页，连家里 WiFi 后 192.168.1.66 和 100.x 都打不开 | 不是程序问题。家里设备在 Tailscale 发布了 192.168.1.0/24 子网路由，手机接受子网路由后，局域网流量被送进隧道。用户关闭手机端“使用子网路由/出口节点”并重连 Tailscale 后，两个地址都恢复正常（2026-10-25）。不要为此改代码 |
 | Playwright 大文件 Buffer 超过 50 MB | 测试应向 `setInputFiles` 传实际文件路径；不是产品上传上限变成 50 MB |
 | CPU/GPU 取消过程中竞争 | 区分 TaskCancelled 与远程失败；不要把取消重新送去 CPU。终态在清理和终止事件保存后提交 |
 
