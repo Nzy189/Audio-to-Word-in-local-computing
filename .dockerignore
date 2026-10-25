@@ -1,0 +1,11 @@
+.git
+**/__pycache__
+**/*.pyc
+**/*.env
+**/.env
+dist
+test-results
+*.tgz
+*.tar.bz2
+deploy/backups
+build-assets/wheels

@@ -1,0 +1,9 @@
+[Unit]
+Description=Renew Atow HTTPS IP certificate
+After=atow-docker.service
+Requires=atow-docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/atow/deploy/renew-cert.sh
+TimeoutStartSec=600

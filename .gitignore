@@ -1,0 +1,15 @@
+# 运行配置（含口令/旧密钥，不入库）
+worker/worker.env
+
+# 发布物与模型（体积大，本地保留）
+dist/
+build-assets/
+sensevoice.tar.bz2
+atow-source.tgz
+
+# 测试音频与截图（本地保留）
+test-results/
+
+# Python 缓存
+__pycache__/
+*.pyc

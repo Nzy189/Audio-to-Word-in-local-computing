@@ -1,0 +1,21 @@
+[Unit]
+Description=Container runtime for Atow transcription
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+Environment=PATH=/opt/atow/runtime/docker:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+ExecStart=/opt/atow/runtime/docker/dockerd --host=unix:///var/run/docker.sock --bridge=none --iptables=false --ip-forward=false --ip-masq=false --storage-driver=overlay2 --log-driver=json-file --log-opt=max-size=10m --log-opt=max-file=3
+ExecReload=/bin/kill -s HUP $MAINPID
+TimeoutStartSec=90
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+LimitNPROC=infinity
+LimitCORE=infinity
+Delegate=yes
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

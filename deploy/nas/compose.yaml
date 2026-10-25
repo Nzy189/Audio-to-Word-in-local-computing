@@ -1,0 +1,37 @@
+services:
+  shengjian:
+    image: shengjian:1.4.0-arm64
+    platform: linux/arm64
+    container_name: shengjian
+    restart: unless-stopped
+    ports:
+      - "${ATOW_BIND_IP:-0.0.0.0}:${ATOW_PORT:-18088}:8787"
+    env_file:
+      - nas.env
+    environment:
+      ASR_THREADS: "2"
+      OMP_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "1"
+      COOKIE_SECURE: "false"
+      PUBLIC_ORIGIN: ""
+    volumes:
+      - ${ATOW_DATA_DIR:-./data}:/data
+    mem_limit: 2g
+    cpus: 2.0
+    pids_limit: 256
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
