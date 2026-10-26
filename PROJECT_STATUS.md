@@ -2,13 +2,15 @@
 
 > **这是本项目唯一的开发状态主文档。后续继续开发、排障或部署，先读本文件。**
 >
-> 更新日期：2026-10-25，用户时区 Asia/Dubai（UTC+04:00）。
-> 最近一次运行状态核查：**2026-10-25 21:03:04 +04:00**。
+> 更新日期：2026-10-26，用户时区 Asia/Dubai（UTC+04:00）。
+> 最近一次运行验证：**2026-10-25**，各目标的最后确认状态见下表；本次仅核对源码与文档，未重新检查运行服务。
 > 项目目录：`F:\Codex Project\atow`。
 
 ## 1. 先看当前进度
 
 **1.4（免密钥电脑加速）已构建、验证并交付安装包；电脑 GPU 服务已重启到免密钥新版并实测通过；物理 NAS 仍是旧版，待用户导入 1.4 镜像。**
+
+**当前源码已删除 NAS↔电脑的连接密钥校验。** NAS 客户端不发送 Authorization，电脑服务不读取 `WORKER_TOKEN`，健康检查、上传、轮询和取消均无需连接密钥。网页无需导入 `computer-connection.json`，默认电脑地址已内置，只保留在线状态、GPU 优先开关与地址修改。NAS 网页的 `ACCESS_CODE` 登录口令和会话校验仍保留。下文 1.2/1.3 的密钥与导入流程仅为历史记录，不作为当前操作步骤。
 
 | 对象 | 已完成 / 最后确认状态 | 仍需注意 |
 | --- | --- | --- |
@@ -37,7 +39,7 @@
 - **NAS 与电脑的音频通信优先走局域网，不走 Tailscale。** 手机在外访问 NAS 可以继续用 Tailscale。
 - 处理完成后删除两端录音与临时文件；失败与终止也要清理。电脑离线时，其残留只能在下次服务启动时清理，不能声称已经远程删除。
 - 日志必须说明任务名、开始时间、实际设备/引擎，尤其是为什么没有使用电脑。不能只输出“引擎已就绪”。
-- 用户不熟悉远程环境变量，不应继续要求其手动填写长密钥。1.3 已改为**网页导入电脑配置和测试连接**。
+- 用户不熟悉远程环境变量，不应要求其手动填写 URL/token。当前 1.4 **无需密钥、无需导入电脑配置文件**；网页自动检测电脑状态，电脑 IP 改变时在网页修改地址即可。1.3 的导入/测试流程已被替代。
 - 用户提出暂停或终止；当前实现**终止**，没有实现暂停/断点恢复。
 - 保留已有转写记录，不中断或清空用户正在运行的业务。
 
@@ -119,7 +121,6 @@ GPU 服务一次处理一个任务；未就绪、忙碌或空闲显存不足时 
 ```text
 F:\Codex Project\atow\dist\shengjian-1.4.zip
 F:\Codex Project\atow\dist\shengjian-1.4\shengjian-z2pro-arm64.tar
-F:\Codex Project\atow\dist\shengjian-1.4\computer-connection.json  （已移除，1.4 不再需要）
 F:\Codex Project\atow\dist\shengjian-1.4\nas.env
 F:\Codex Project\atow\dist\shengjian-1.4\README.md
 F:\Codex Project\atow\dist\shengjian-1.4\BUILD-INFO.json
@@ -154,7 +155,7 @@ F:\Codex Project\atow\dist\shengjian-1.4\SHA256SUMS.txt
 | `deploy/atow-*.service`、`*.timer` | ECS 运行时与 HTTPS 续期 |
 | `build-assets/models/` | 构建用模型文件，已忽略，不是业务录音 |
 | `test-results/` | 公开样例与测试截图，已忽略，不打入镜像 |
-| `dist/` | 历史/当前发布包，已忽略；最新是 1.3 |
+| `dist/` | 历史/当前发布包，已忽略；最新是 1.4 |
 
 ## 6. 配置、凭据与持久化
 
@@ -163,7 +164,7 @@ F:\Codex Project\atow\dist\shengjian-1.4\SHA256SUMS.txt
 | 数据 | 存放位置 | 说明 |
 | --- | --- | --- |
 | NAS 网页访问口令 | 当前容器 `ACCESS_CODE`；个人发布目录 `nas.env` | 手动创建容器不会自动加载该文件，仍需填写这一个必填变量 |
-| PC 服务连接密钥 | **1.4 起不再使用**；`worker/worker.env` 的 `WORKER_TOKEN` 行已不被代码读取 | 旧值仅存在于历史发布物与旧版运行进程中 |
+| PC 服务连接密钥 | **1.4 起不再使用**；即使旧配置仍有 `WORKER_TOKEN`，当前代码也不读取 | 无需填写或恢复；旧版本文件可能仍有历史字段 |
 | NAS 电脑地址设置 | `/data/jobs.sqlite3` 的 `settings` 表（1.4 起仅存地址与开关，不再存密钥） | 默认地址 `http://192.168.1.73:18788` 已内置，无需导入任何文件 |
 | NAS 会话签名密钥 | `/data/.session-secret` | 自动生成并持久化，权限 0600；升级/备份时保留 |
 | ECS 应用凭据 | `/opt/atow/app.env` | root 只读权限 0600；并不包含 SSH 密码 |
@@ -233,6 +234,8 @@ queued → remote_upload → remote_processing → done
 
 ### 已通过
 
+以下运行测试均为历史验证。2026-10-26 本次只做源码与文档静态核对：确认 `service/remote_worker.py` 不发送 Authorization，`worker/server.py` 不读取连接密钥且请求处理无密钥校验，网页没有配置导入或密钥输入控件；确认 `service/app.py` 仍保留网页登录与会话校验。已修正文档中的旧导入步骤、旧服务状态和版本描述；未重建发布物、未重启服务、未执行转写测试。
+
 - ECS：真实 HTTPS 证书、中文/英文、M4A/MP3/WebM/WAV、静音/错误音频、TXT、音频删除、手机布局。
 - ARM64：真实 ARM64 镜像和 Python、归档导入、内置模型、HTTP 认证、会话和记录重启保留。
 - 混合调度：模拟 NAS → LAN 地址 → 真实 RTX 5080；电脑未就绪、忙碌、错误和处理中断回退 CPU。
@@ -262,12 +265,12 @@ queued → remote_upload → remote_processing → done
 | `deploy/verify.py` | 原 ECS 环境，读取服务器应用配置；会创建并清理测试任务 |
 | `deploy/browser-check.cjs`、`records-check.cjs` | 历史 ECS 浏览器与记录测试 |
 | `deploy/migration-check.py` | 在镜像内运行，隔离临时 SQLite，不启动真实识别 worker |
-| `deploy/nas/verify-arm64.py` | 早期 1.1 ARM64 测试，有旧镜像/容器名，不应直接当 1.3 入口 |
+| `deploy/nas/verify-arm64.py` | 早期 1.1 ARM64 测试，有旧镜像/容器名，不应直接当当前版本入口 |
 | `deploy/nas/verify-hybrid.py`、`fault-worker.py` | 1.2 混合调度和故障模拟，需要隔离 QA 容器 |
-| `deploy/nas/verify-observability.py` | 1.3 网页配置、具体失败原因、日志、实际 GPU 与重启 |
+| `deploy/nas/verify-observability.py` | 当前 1.4 零配置直连、网页地址设置、具体失败原因、日志、实际 GPU 与重启 |
 | `deploy/nas/verify-cancellation.py` | 排队/本机/实际 GPU 终止与音频清理，使用公开合成的一小时 WAV |
 | `deploy/nas/verify-cancel-race.py` | 取消与断线竞争、重启恢复，隔离临时数据库 |
-| `deploy/nas/browser-settings-check.cjs` | 1.3 导入/测试、任务日志、终止、下载与手机 QA；会重置隔离 QA 的设置 |
+| `deploy/nas/browser-settings-check.cjs` | 当前 1.4 无导入/无密钥状态卡、任务日志、终止、下载与手机 QA；会重置隔离 QA 的设置 |
 
 **不要把测试脚本中的 QA 容器名改成用户的生产容器直接执行。** 测试会上传/删除任务，部分还会重启容器、清空 QA 连接设置。应先阅读脚本中的固定端口、名称、路径和测试前置条件。
 
@@ -287,13 +290,13 @@ Invoke-RestMethod 'http://192.168.1.66:18088/api/health'
 
 ### 检查电脑 GPU 服务
 
-1.4 起电脑服务不再需要密钥（当前运行的旧版仍要求，返回 401 就说明服务还没重启到新版）：
+1.4 起电脑服务不再需要密钥；2026-10-25 已确认电脑服务重启到免密钥新版。可用以下请求检查当前状态：
 
 ```powershell
 Invoke-RestMethod 'http://192.168.1.73:18788/v1/health'
 ```
 
-应返回 `ready`、`busy`、`name`（RTX 5080）。旧版进程会对此返回 401。
+应返回 `ready`、`busy`、`name`（RTX 5080）。若返回 401/403，检查目标地址是否正确、是否仍有旧版服务或访问代理；不要为当前新版重新配置密钥。
 
 ### Windows 运行位置
 
@@ -339,10 +342,10 @@ ECS 原启动/网关/证书文件均在 `/opt/atow`，主要容器为 `atow-app`
 
 | 问题 | 已定位原因 / 处理 |
 | --- | --- |
-| 容器启动提示 `Set ACCESS_CODE...` | 手动创建未设置网页口令，镜像不会自动读取旁边的 nas.env；1.3 仍需这个必填值 |
+| 容器启动提示 `Set ACCESS_CODE...` | 手动创建未设置网页口令，镜像不会自动读取旁边的 nas.env；当前 1.4 仍需这个网页口令，与已删除的电脑连接密钥无关 |
 | 网页端口冲突或访问不到 | 18080 被占用；用户实际选了 18088。不要再拿旧建议 18081 做检查 |
 | GPU 0%，NAS 在跑，电脑明明开机 | 当时 PC 健康 ready，NAS 任务直接 local_cpu 且 worker_note 为空，说明 1.2 没有启用远程配置；用户明确说没有填写那两个变量 |
-| 用户不理解 URL/token | 1.3 改网页导入/测试，缺失时明确提示，日志记录具体原因，不再静默跑 NAS |
+| 用户不理解 URL/token | 当前 1.4 已删除电脑连接密钥校验并内置默认地址，无需导入配置；网页自动检测状态，仅在 IP 改变时修改地址，回退原因写入日志 |
 | 日志只有引擎就绪且有 `[32m` 乱码 | 已加入逐任务日志，Uvicorn 使用 `--no-use-colors` |
 | PC 保存结果时 WinError 17 | 曾在同目录 `os.replace` 出错，已对 Windows 错误 17 做 copy+unlink 兼容；具体文件系统原因未进一步确认，不要随意移除该兼容处理 |
 | Docker 向 readonly/tmpfs 的 `/tmp` 复制测试文件失败 | 改用 `docker exec -i` 将测试字节写入临时文件，不能据此判断业务上传失败 |
@@ -354,7 +357,7 @@ ECS 原启动/网关/证书文件均在 `/opt/atow`，主要容器为 `atow-app`
 
 尚未实现或未确认：
 
-- 物理 Z2 Pro 升级 1.3、连接导入以及 NAS 实机 → PC 的闭环联调。
+- 物理 Z2 Pro 升级 1.4，以及 NAS 实机 → PC 的免密钥闭环联调；无需连接配置导入。
 - 同一份长录音在 Z2 Pro、ECS、RTX 5080 的严格对照基准。
 - 暂停、断点续跑、任务跨重启续算；目前普通任务重启会重新处理。
 - 自动 LAN 设备发现；当前靠固定地址/网页修改，建议 DHCP 地址保留。不要声称地址变化已自动发现。

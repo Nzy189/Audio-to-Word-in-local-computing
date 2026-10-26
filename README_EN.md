@@ -31,6 +31,7 @@ Phone uploads an existing recording
 
 - Upload existing audio files (MP3 / M4A / WAV / WebM, …), up to 300 MB and 3 hours each; no microphone capture, no live transcription.
 - Zero configuration: the default PC address is built in; whenever the PC is on, jobs use the GPU. The web "PC acceleration" card shows live online/offline status.
+- NAS-to-PC connection key checks have been removed; no token or PC configuration import is required. The NAS web app still requires its `ACCESS_CODE` login.
 - Automatic fallback: PC off, asleep, busy, low on VRAM or failing → NAS CPU, with the exact reason in the task log.
 - Job history: audio duration, processing time, submit/start/finish times, actual device and engine; click through to the full text, copy or download as TXT.
 - Termination: queued, NAS CPU and PC GPU jobs can all be cancelled; the terminal state only appears after both sides' temp audio is cleaned.
