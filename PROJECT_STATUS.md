@@ -3,7 +3,7 @@
 > **这是本项目唯一的开发状态主文档。后续继续开发、排障或部署，先读本文件。**
 >
 > 更新日期：2026-10-27，用户时区 Asia/Dubai（UTC+04:00）。
-> 最近一次运行验证：**2026-10-28**，1.5.4 镜像 health 实测、提炼日志时间线实测、流式提炼 QA 与发布打包核验；各目标的最后确认状态见下表。本次未触碰生产容器、电脑 GPU 服务与物理 NAS。
+> 最近一次运行验证：**2026-10-28**，1.5.5 镜像 health 实测、结构化摘要真实端点验证与发布打包核验；各目标的最后确认状态见下表。本次未触碰生产容器、电脑 GPU 服务与物理 NAS。
 > 项目目录：`F:\Codex Project\atow`。
 
 ## 1. 先看当前进度
@@ -17,7 +17,7 @@
 | 对象 | 已完成 / 最后确认状态 | 仍需注意 |
 | --- | --- | --- |
 | 本地源码 | 1.5：AI 提炼（NAS 端 OpenAI 兼容 API、env+网页双通道、详情页双页签、随时一键生成/重新生成、摘要要求具体信息、错误详情透出、不发送 temperature）、识别链路降噪调优、网页首屏控制台报错修复；1.4 免密钥等其余功能保留 | 单测 10/10、容器 Phase A 3/3 + Phase B 7/7、浏览器 10/10、真实端点验证（kimi-k3 全形状 200 + 摘要具体性）、真实 GPU 回归 7+4 全部通过（2026-10-28） |
-| 最新发布物 | `dist/shengjian-1.5.4.zip`；镜像 `shengjian:1.5.4-arm64` | 已构建、验证；**不含任何 API Key，也不含 computer-connection.json**；不能据此推断已安装到 NAS |
+| 最新发布物 | `dist/shengjian-1.5.5.zip`；镜像 `shengjian:1.5.5-arm64` | 已构建、验证；**不含任何 API Key，也不含 computer-connection.json**；不能据此推断已安装到 NAS |
 | Windows RTX 5080 服务 | **仍运行 1.4 代码**（2026-10-25 重启的免密钥版，实测通过）；1.5 调优需重启服务后生效 | 重启前先确认健康接口非 busy、进程命令行指向本项目；由控制器与用户协调执行，不要擅自操作 |
 | Windows 防火墙 | `Shengjian-GPU-LAN-18788` 规则已启用，允许本地子网 TCP 18788 | 用户已实际执行管理员脚本，不要反复要求其再次放行 |
 | 物理极空间 NAS | 用户已运行旧版；网页和健康接口均可访问；此前确认具有 1.2 混合版界面 | **未升级 1.5**；导入 1.5 前仍走 NAS CPU（1.2 从未配置电脑地址） |
@@ -26,8 +26,8 @@
 ### 下一步从这里继续
 
 1. 重启电脑 GPU 服务到 1.5 代码（与用户确认后执行）：先查 `http://192.168.1.73:18788/v1/health` 确认非 `busy`，核对监听 18788 的进程命令行含 `worker\server.py` 再停止，用 `worker/start-worker.ps1` 重新启动并复核健康接口 ready。
-2. 用户在极空间导入 `dist/shengjian-1.5.4/shengjian-z2pro-arm64.tar`（镜像 `shengjian:1.5.4-arm64`），**继续挂载原 `/data` 文件夹，保持 18088 → 8787，保留原 `ACCESS_CODE`**；无需再导入任何电脑配置文件。
-3. 检查 NAS `http://192.168.1.66:18088/api/health` 返回 `"version":"1.5.4"`（旧包返回 1.5.3 或更早；网页右上角状态区下也会直接显示 v1.5.4）。
+2. 用户在极空间导入 `dist/shengjian-1.5.5/shengjian-z2pro-arm64.tar`（镜像 `shengjian:1.5.5-arm64`），**继续挂载原 `/data` 文件夹，保持 18088 → 8787，保留原 `ACCESS_CODE`**；无需再导入任何电脑配置文件。
+3. 检查 NAS `http://192.168.1.66:18088/api/health` 返回 `"version":"1.5.5"`（旧包返回 1.5.4 或更早；网页右上角状态区下也会直接显示 v1.5.5）。
 4. 配置 AI 提炼：在 NAS `nas.env` 取消注释 `LLM_API_KEY` 并填入 Key（包内模板已给出其余默认项），或登录网页在“AI 提炼设置”卡片中配置并测试连接；随后上传一段短录音，确认详情页默认显示 AI 内容页签、可切回原文、概要可复制/下载。
 5. 用此前“噪声大”的真实录音做 A/B 对照验收（对照 1.4 时代的记录比较错别字、口水词、无意义输出）；若识别质量变差，按第 12 节单独回滚调优参数，不影响 AI 提炼功能。
 6. 将结果和检查时间更新到本文件。**不要把 Docker Desktop ARM64 模拟验证写成 Z2 Pro 实机验证。**
@@ -121,18 +121,18 @@ GPU 服务一次处理一个任务；未就绪、忙碌或空闲显存不足时 
 ### 最新 1.5 发布物
 
 ```text
-F:\Codex Project\atow\dist\shengjian-1.5.4.zip
-F:\Codex Project\atow\dist\shengjian-1.5.4\shengjian-z2pro-arm64.tar
-F:\Codex Project\atow\dist\shengjian-1.5.4\nas.env
-F:\Codex Project\atow\dist\shengjian-1.5.4\README.md
-F:\Codex Project\atow\dist\shengjian-1.5.4\BUILD-INFO.json
-F:\Codex Project\atow\dist\shengjian-1.5.4\SHA256SUMS.txt
+F:\Codex Project\atow\dist\shengjian-1.5.5.zip
+F:\Codex Project\atow\dist\shengjian-1.5.5\shengjian-z2pro-arm64.tar
+F:\Codex Project\atow\dist\shengjian-1.5.5\nas.env
+F:\Codex Project\atow\dist\shengjian-1.5.5\README.md
+F:\Codex Project\atow\dist\shengjian-1.5.5\BUILD-INFO.json
+F:\Codex Project\atow\dist\shengjian-1.5.5\SHA256SUMS.txt
 ```
 
-- ZIP：274,943,541 字节，约 262.2 MiB；SHA-256 `6a4dfeeddbd0ef1b59a912d4bdef596931451b5a9a413d4f997d3bd275737207`。
-- 镜像 tar：275,777,024 字节，SHA-256 `0225824dae624e68b0d2d235c1d675bb5d51c75ebf0d13dbdd51ee1419209330`。
-- 1.5.4 为最终交付版：在 1.5.3 基础上，每次 AI 提炼把"开始（模型、转写字数）"事件写入容器日志，`docker logs` 可见完整提炼时间线（开始 → 完成/失败）。`dist/shengjian-1.5/` 至 `dist/shengjian-1.5.3/` 已被取代，仅作历史保留。
-- Docker 镜像标签：`shengjian:1.5.4-arm64`；`docker image inspect` 确认架构 arm64；验证容器实测 `/api/health` 返回 `"version":"1.5.4"`，容器日志实测含"AI 提炼开始：模型 stub-ok，转写 14 字"及对应完成/失败行。
+- ZIP：274,944,230 字节，约 262.2 MiB；SHA-256 `52488798acb2b26fa5b6adcf03bf084ee778c52f431c892d0264228d9d6de469`。
+- 镜像 tar：275,776,512 字节，SHA-256 `023c2b9789f0b3571c617cc9f19170777635dc7c4e0141d5357944f5a4956659`。
+- 1.5.5 为最终交付版：在 1.5.4 基础上，摘要改为按大类分类组织并单列【遗留任务】（负责人+期限）。`dist/shengjian-1.5/` 至 `dist/shengjian-1.5.4/` 已被取代，仅作历史保留。
+- Docker 镜像标签：`shengjian:1.5.5-arm64`；`docker image inspect` 确认架构 arm64；验证容器实测 `/api/health` 返回 `"version":"1.5.5"`。
 - ZIP 解压核验：14/14 个文件与源目录一致，解压后 tar 的 SHA-256 与源一致。
 - 镜像内包含模型、VAD、FFmpeg；不内置用户网页口令，也**不含任何 API Key**；包内无 `computer-connection.json`（免密钥后无需导入任何配置）。`nas.env` 含网页口令并附注释掉的 `LLM_*` 模板行（默认端点与 kimi-k3，Key 留空），不要公开分享整个个人安装包。
 - `SHA256SUMS.txt` 覆盖包内 13 个文件（与 1.4 相同的文件集与格式），`sha256sum -c` 全部 OK。
@@ -278,6 +278,7 @@ queued → remote_upload → remote_processing → done
   - 1.5.1 版本化重打包（2026-10-28）：热修复未升版本号导致 1.5.0 新旧包无法通过 `/api/health` 区分（用户反馈"重新生成按钮没做"实为 NAS 仍运行热修复前镜像）。升版本 1.5.1（app.py health、compose、README、BUILD-INFO 同步）并重打包到 `dist/shengjian-1.5.1/`；验证容器实测 health 返回 `"version":"1.5.1"`，SHA256SUMS 13/13、架构 arm64。
   - 1.5.2 流式修复（2026-10-28，提交 `ebe8b9f`/`134d184`）：用户实机长录音提炼报"无法连接 AI 服务：The read operation timed out"。根因：非流式请求下服务器需全部生成完才发首字节，kimi-k3（推理模型）对长转写的思考+全文重写超过 120 秒读取超时。修复：LLM 请求改为 SSE 流式（`stream: true`），超时作用于相邻数据块之间，模型持续输出即不中断；流内 error 对象透出消息；单测扩到 11/11（stub 同步改 SSE 协议，新增流内错误用例）；真实端点流式验证 9304 字转写 11 秒返回、摘要 10 条全为具体数字；QA stub `stub-llm.py` 同步改 SSE；镜像上 Phase B 7/7、浏览器 10/10。
   - 1.5.3 版本号显示（2026-10-28，提交 `b53d5c4`）：应用户要求，网页右上角状态区下显示当前版本号（读取 `/api/health` 的 version 字段，以后升版本自动跟随，无需改网页）。验证容器实测 health 返回 `"version":"1.5.3"`，浏览器实测页面显示 `v1.5.3`、无控制台报错（截图 `test-results/version-display.png`）；重打包 `dist/shengjian-1.5.3/`，SHA256SUMS 13/13、架构 arm64。
+  - 1.5.5 结构化摘要（2026-10-28，提交 `54c76b3`）：应用户要求，摘要按大类分类组织并单列【遗留任务】（负责人+期限）。采用单次调用直接产出结构化摘要（分类时模型可见完整转写原文，信息不丢失；用户原建议的二次加工方案未采用，如质量不满意可随时加链）。真实端点实测：kimi-k3 单次调用 12 秒返回，自动产出 5 个大类（预算/产品优化/服务器迁移/采购/合同续签）+ 4 条带负责人和期限的遗留任务（证据 `test-results/structured-summary-check.txt`）；单测 11/11 不受影响；重打包 `dist/shengjian-1.5.5/`，SHA256SUMS 13/13，验证容器 health 返回 `"version":"1.5.5"`。
   - 1.5.4 提炼日志时间线（2026-10-28，提交 `3c7bb4d`）：应用户要求，每次 AI 提炼把开始事件（模型名、转写字数）写入容器日志，`docker logs` 可见完整时间线（转写完成 → AI 提炼开始 → 完成/失败），长录音提炼期间不再日志静默。1.5.4 镜像上 Phase B 7/7，容器日志实测含"AI 提炼开始：模型 stub-ok，转写 14 字"与对应完成/失败行；重打包 `dist/shengjian-1.5.4/`，SHA256SUMS 13/13、架构 arm64。
 
 一次取消测试观察到 CPU 清理约 0.7 秒、真实 GPU 清理约 1.5 秒，仅是该测试结果，不是所有设备的响应保证。
@@ -318,7 +319,7 @@ queued → remote_upload → remote_processing → done
 Invoke-RestMethod 'http://192.168.1.66:18088/api/health'
 ```
 
-1.5.4 应返回 `version: 1.5.4`（物理 NAS 升级前仍返回旧版本；网页右上角状态区下也直接显示 v1.5.4）。健康接口显示 ready 不等于电脑加速已经连通；后者看网页“电脑加速”状态卡。
+1.5.5 应返回 `version: 1.5.5`（物理 NAS 升级前仍返回旧版本；网页右上角状态区下也直接显示 v1.5.5）。健康接口显示 ready 不等于电脑加速已经连通；后者看网页“电脑加速”状态卡。
 
 ### 检查电脑 GPU 服务
 
@@ -345,11 +346,11 @@ Invoke-RestMethod 'http://192.168.1.73:18788/v1/health'
 
 ```powershell
 docker buildx build --platform linux/arm64 --load --provenance=false `
-  --tag shengjian:1.5.4-arm64 --file deploy/nas/Dockerfile .
+  --tag shengjian:1.5.5-arm64 --file deploy/nas/Dockerfile .
 
 docker buildx build --platform linux/arm64 --provenance=false `
-  --tag shengjian:1.5.4-arm64 --file deploy/nas/Dockerfile `
-  --output type=docker,dest=dist/shengjian-1.5.4/shengjian-z2pro-arm64.tar .
+  --tag shengjian:1.5.5-arm64 --file deploy/nas/Dockerfile `
+  --output type=docker,dest=dist/shengjian-1.5.5/shengjian-z2pro-arm64.tar .
 ```
 
 需要 Docker Desktop 的 Linux 引擎运行，已核查支持 ARM64 模拟。NAS 构建上下文是项目根目录。`build-assets/models/` 必须存在；其内容为 SenseVoice INT8 模型、tokens、许可证和 Silero VAD。
