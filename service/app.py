@@ -22,6 +22,7 @@ import sherpa_onnx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from remote_worker import RemoteUnavailable, RemoteWorker, TaskCancelled
+import llm_refine
 
 DATA = Path(os.getenv("DATA_DIR", "/data"))
 MODELS = Path(os.getenv("MODEL_DIR", "/models"))
@@ -31,6 +32,12 @@ ORIGIN = os.getenv("PUBLIC_ORIGIN", "https://80.238.236.1")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").lower() in ("true", "1", "yes")
 ASR_THREADS = max(1, min(8, int(os.getenv("ASR_THREADS", "3"))))
 REMOTE_URL = os.getenv("REMOTE_WORKER_URL", "http://192.168.1.73:18788").strip()
+LLM_DEFAULT_URL = "https://llm-4qs0qwijnzh269f3.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+LLM_DEFAULT_MODEL = "kimi-k3"
+LLM_ENV_URL = os.getenv("LLM_BASE_URL", "").strip()
+LLM_ENV_MODEL = os.getenv("LLM_MODEL", "").strip()
+LLM_ENV_KEY = os.getenv("LLM_API_KEY", "").strip()
+LLM_ENV_ENABLED = os.getenv("LLM_ENABLED", "true").lower() in ("true", "1", "yes")
 LOCAL_NODE_NAME = os.getenv("LOCAL_NODE_NAME", "本机 CPU")
 LOCAL_ENGINE = "SenseVoice INT8 / sherpa-onnx CPU"
 REMOTE_ENGINE = "SenseVoiceSmall / FunASR CUDA"
@@ -153,6 +160,64 @@ def remote_from_settings(config):
         return RemoteWorker(config["url"])
     except ValueError:
         raise RemoteUnavailable("电脑地址格式不正确，请检查电脑加速设置", "invalid_config")
+
+
+def llm_settings():
+    with db() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key='llm_refine'").fetchone()
+    if row:
+        config = json.loads(row[0])
+        return {
+            "enabled": bool(config.get("enabled", True)),
+            "base_url": config.get("base_url") or LLM_DEFAULT_URL,
+            "model": config.get("model") or LLM_DEFAULT_MODEL,
+            "api_key": config.get("api_key", ""),
+            "source": "网页设置",
+        }
+    return {
+        "enabled": LLM_ENV_ENABLED,
+        "base_url": LLM_ENV_URL or LLM_DEFAULT_URL,
+        "model": LLM_ENV_MODEL or LLM_DEFAULT_MODEL,
+        "api_key": LLM_ENV_KEY,
+        "source": "默认配置",
+    }
+
+
+def claim_refine(job_id):
+    with db() as conn:
+        claimed = conn.execute(
+            "UPDATE jobs SET refine_status='running' WHERE id=? AND (refine_status IS NULL OR refine_status IN ('none','done','failed'))",
+            (job_id,))
+        return bool(claimed.rowcount)
+
+
+def run_refine(job_id):
+    started = time.time()
+    try:
+        config = llm_settings()
+        with db() as conn:
+            row = conn.execute("SELECT text FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is None or not row["text"]:
+            raise llm_refine.RefineError("没有可提炼的转写文字")
+        result = llm_refine.refine(row["text"], config["base_url"], config["model"], config["api_key"])
+        update(job_id, refine_status="done", refined_text=result["corrected"], summary=result["summary"], refine_error="", refine_at=time.time())
+        task_event(job_id, "提炼", "AI 提炼完成，耗时 %.1f 秒" % (time.time() - started))
+    except Exception as exc:
+        reason = str(exc)[:200] or exc.__class__.__name__
+        update(job_id, refine_status="failed", refine_error=reason, refine_at=time.time())
+        task_event(job_id, "提炼", "AI 提炼失败：" + reason)
+
+
+def maybe_refine(job_id):
+    config = llm_settings()
+    if not config["enabled"] or not config["api_key"]:
+        return
+    with db() as conn:
+        row = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if row is None or row["status"] != "done":
+        return
+    if claim_refine(job_id):
+        run_refine(job_id)
 
 
 def clean_expired():
@@ -379,6 +444,7 @@ def worker():
                     with cancel_lock:
                         cancel_flags.pop(job["id"], None)
                     active_job = None
+                maybe_refine(job["id"])
             else:
                 stop.wait(1)
     except Exception:
@@ -402,6 +468,11 @@ async def lifespan(app):
         for column, default in (("backend", "local_cpu"), ("backend_name", ""), ("worker_note", ""), ("engine_name", "")):
             if column not in columns:
                 conn.execute("ALTER TABLE jobs ADD COLUMN " + column + " TEXT DEFAULT '" + default + "'")
+        for column, default in (("refine_status", "none"), ("refined_text", ""), ("summary", ""), ("refine_error", "")):
+            if column not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN " + column + " TEXT DEFAULT '" + default + "'")
+        if "refine_at" not in columns:
+            conn.execute("ALTER TABLE jobs ADD COLUMN refine_at REAL DEFAULT NULL")
         conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL)")
         conn.execute("CREATE TABLE IF NOT EXISTS job_events (id INTEGER PRIMARY KEY AUTOINCREMENT,job_id TEXT NOT NULL,created REAL NOT NULL,event TEXT NOT NULL,message TEXT NOT NULL)")
         conn.execute("CREATE INDEX IF NOT EXISTS job_events_job_id ON job_events(job_id,id)")
@@ -495,6 +566,72 @@ def test_worker_config():
         return {"ok": False, "code": "unavailable", "message": "电脑服务暂时无法连接"}
 
 
+@app.get("/api/llm-config")
+def llm_config():
+    config = llm_settings()
+    key = config["api_key"]
+    return {"enabled": config["enabled"], "base_url": config["base_url"], "model": config["model"],
+            "api_key_set": bool(key), "api_key_masked": (key[:3] + "***") if key else "", "source": config["source"]}
+
+
+@app.post("/api/llm-config")
+async def save_llm_config(request: Request):
+    try:
+        raw = await request.body()
+        if len(raw) > 8192:
+            raise ValueError()
+        body = json.loads(raw)
+        current = llm_settings()
+        enabled = body.get("enabled", current["enabled"])
+        base_url = body.get("base_url") or current["base_url"]
+        model = body.get("model") or current["model"]
+        api_key = body.get("api_key", "")
+        if not isinstance(enabled, bool) or not isinstance(base_url, str) or not isinstance(model, str) or not isinstance(api_key, str):
+            raise ValueError()
+        if len(base_url) > 512 or len(model) > 128 or len(api_key) > 512:
+            raise ValueError()
+        base_url = base_url.strip().rstrip("/")
+        model = model.strip()
+        if not api_key or api_key == current["api_key"][:3] + "***":
+            api_key = current["api_key"]
+        config = {"enabled": enabled, "base_url": base_url, "model": model, "api_key": api_key}
+        with db() as conn:
+            conn.execute("INSERT INTO settings(key,value) VALUES ('llm_refine',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(config),))
+        log.info("AI 提炼设置已保存 | 启用=%s | 模型=%s | 地址=%s | Key=%s", enabled, model or "未填写", base_url or "未填写", "已设置" if api_key else "未设置")
+        return llm_config()
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(400, "配置格式无效，请检查地址、模型和 Key")
+
+
+@app.post("/api/llm-config/test")
+def test_llm_config():
+    config = llm_settings()
+    if not config["api_key"]:
+        return {"ok": False, "message": "请先填写 API Key 并保存"}
+    try:
+        llm_refine.refine("这是一条测试。", config["base_url"], config["model"], config["api_key"], timeout=60)
+        return {"ok": True, "message": "连接成功，模型 " + config["model"] + " 已返回测试结果"}
+    except llm_refine.RefineError as exc:
+        return {"ok": False, "message": str(exc)}
+
+
+@app.post("/api/jobs/{job_id}/refine")
+def refine_job(job_id: str):
+    with db() as conn:
+        row = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "任务不存在或已过期")
+    if row["status"] != "done":
+        raise HTTPException(409, "转写完成后才能提炼")
+    config = llm_settings()
+    if not config["enabled"] or not config["api_key"]:
+        raise HTTPException(409, "请先在设置中启用 AI 提炼并填写 API Key")
+    if not claim_refine(job_id):
+        raise HTTPException(409, "正在提炼中，请稍候")
+    threading.Thread(target=run_refine, args=(job_id,), daemon=True).start()
+    return {"ok": True, "refine_status": "running"}
+
+
 @app.post("/api/login")
 async def login(request: Request):
     ip = request.headers.get("x-real-ip") or request.client.host
@@ -583,10 +720,18 @@ def detail(job_id: str):
 
 
 @app.get("/api/jobs/{job_id}/text")
-def download(job_id: str):
+def download(job_id: str, part: str = "original"):
     job = detail(job_id)
     if job["status"] != "done":
         raise HTTPException(409, "转写尚未完成")
+    if part == "refined":
+        if job["refine_status"] != "done" or not job["refined_text"]:
+            raise HTTPException(409, "AI 优化原文尚未生成")
+        return PlainTextResponse(job["refined_text"], headers={"Content-Disposition": 'attachment; filename="transcript-ai.txt"'})
+    if part == "summary":
+        if job["refine_status"] != "done" or not job["summary"]:
+            raise HTTPException(409, "内容概要尚未生成")
+        return PlainTextResponse(job["summary"], headers={"Content-Disposition": 'attachment; filename="transcript-summary.txt"'})
     return PlainTextResponse(job["text"], headers={"Content-Disposition": 'attachment; filename="transcript.txt"'})
 
 

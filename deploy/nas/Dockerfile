@@ -10,7 +10,7 @@ RUN pip install -r requirements.txt \
     && useradd --uid 10001 --gid 10001 --create-home atow \
     && mkdir /data && chown 10001:10001 /data
 COPY build-assets/models/ /opt/atow-models/
-COPY service/app.py service/index.html service/remote_worker.py ./
+COPY service/app.py service/index.html service/remote_worker.py service/llm_refine.py ./
 COPY deploy/nas/entrypoint.py /usr/local/bin/atow-entrypoint.py
 LABEL org.opencontainers.image.title="Shengjian ARM64 NAS" \
     org.opencontainers.image.description="Offline audio transcription with history and timing for ARM64 NAS"
