@@ -23,7 +23,7 @@
 const $=id=>document.getElementById(id);let selected=null,listing=[],busy=false,loggedIn=false,polling=false,toastTick,computerLoaded=false,llmLoaded=false,activeTab=null,currentJob=null;
 const labels={queued:'等待转写',converting:'处理音频',processing:'转写中',remote_upload:'发送到电脑',remote_processing:'电脑转写中',done:'已完成',error:'失败',cancelling:'终止中',cancelled:'已终止'};
 function toast(s){$('toast').textContent=s;$('toast').classList.remove('hidden');clearTimeout(toastTick);toastTick=setTimeout(()=>$('toast').classList.add('hidden'),4000)}
-function loginView(){loggedIn=false;computerLoaded=false;$('loginView').classList.remove('hidden');$('appView').classList.add('hidden');$('logout').classList.add('hidden')}
+function loginView(){loggedIn=false;computerLoaded=false;llmLoaded=false;$('loginView').classList.remove('hidden');$('appView').classList.add('hidden');$('logout').classList.add('hidden')}
 function appView(){loggedIn=true;if(!computerLoaded){computerLoaded=true;loadComputerSettings().then(()=>checkComputer()).catch(e=>computerMessage(e.message,false))}if(!llmLoaded){llmLoaded=true;loadLlmSettings().catch(e=>llmMessage(e.message,false))}$('loginView').classList.add('hidden');$('appView').classList.remove('hidden');$('logout').classList.remove('hidden')}
 async function api(url,opts={}){const r=await fetch(url,opts);let data;try{data=await r.json()}catch{throw Error('服务器暂时无法响应，请稍后重试')}if(!r.ok){if(r.status===401&&url!='/api/login')loginView();throw Error(typeof data.detail==='string'?data.detail:'请求失败，请稍后重试')}return data}
 async function health(){try{const h=await api('/api/health');$('health').textContent=h.ready?'转写服务就绪':h.failed?'识别服务暂不可用':'识别引擎准备中';$('dot').classList.toggle('wait',!h.ready)}catch{$('health').textContent='连接中断';$('dot').classList.add('wait')}}
@@ -82,7 +82,7 @@ function renderRefine(job){
   $('refineError').classList.toggle('hidden',!failed);$('refineError').textContent=failed?'AI 提炼失败：'+(job.refine_error||'未知原因'):'';
   $('retryRefine').classList.toggle('hidden',!failed);
   const mainText=ai?$('refinedText'):$('result');
-  $('copy').disabled=!mainText.value;$('download').disabled=job.status!=='done';
+  $('copy').disabled=!mainText.value;$('download').disabled=job.status!=='done'||(ai&&job.refine_status!=='done');
   $('copySummary').disabled=job.refine_status!=='done';$('downloadSummary').disabled=job.refine_status!=='done';
 }
 $('backRecords').onclick=()=>document.querySelector('.history').scrollIntoView({behavior:'smooth',block:'start'});
