@@ -526,7 +526,7 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"ready": ready, "failed": engine_failed, "version": "1.5.4"}
+    return {"ready": ready, "failed": engine_failed, "version": "1.5.5"}
 
 
 @app.get("/api/worker-config")
