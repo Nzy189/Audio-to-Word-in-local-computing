@@ -56,16 +56,17 @@ const assert = require('node:assert/strict');
   assert.equal(await page.locator('#refinedText').isVisible(),true);
   assert.equal(await page.locator('#result').isVisible(),false);
   ok('5 raw tab shows original transcript and switching back keeps AI content');
-  // 6. summary copy and download usable; retry refine hidden in done state
+  // 6. summary copy and download usable; regenerate button visible in done state
   assert.equal(await page.locator('#copySummary').isDisabled(),false);
   assert.equal(await page.locator('#downloadSummary').isDisabled(),false);
-  assert.equal(await page.locator('#retryRefine').isHidden(),true);
+  assert.equal(await page.locator('#retryRefine').isVisible(),true);
+  assert.equal(await page.locator('#retryRefine').textContent(),'重新提炼');
   await page.locator('#copySummary').click();
   await page.waitForFunction(()=>document.querySelector('#toast').textContent.includes('已复制概要'),null,{timeout:10000});
   const downloadEvent=page.waitForEvent('download');await page.locator('#downloadSummary').click();const download=await downloadEvent;
   await download.saveAs('test-results/refine-browser-summary.txt');
   assert.equal(fs.readFileSync('test-results/refine-browser-summary.txt','utf8'),'- 测试要点');
-  ok('6 summary copy and download work; retry refine hidden in done state');
+  ok('6 summary copy and download work; regenerate button visible in done state');
   // 7. 390x844 viewport has no horizontal overflow
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=390),true,'scrollWidth '+await page.evaluate(()=>document.documentElement.scrollWidth));
   ok('7 390px viewport has no horizontal overflow');
@@ -76,9 +77,24 @@ const assert = require('node:assert/strict');
   assert.equal(await page.locator('#aiPane').isVisible(),true);
   await page.screenshot({path:'test-results/refine-browser.png',fullPage:true});
   ok('8 tabs and cards lay out normally on mobile');
-  // 9. no browser console errors during the whole flow
+  // 9. job transcribed with AI disabled shows no tabs; enabling shows 生成 AI 内容; click generates
+  await page.locator('#llmEnabled').click();
+  await page.waitForFunction(()=>document.querySelector('#toast').textContent.includes('已保存'),null,{timeout:10000});
+  await page.locator('#file').setInputFiles({name:'网页提炼检查2.wav',mimeType:'audio/wav',buffer:fs.readFileSync('test-results/zh.wav')});
+  await page.waitForFunction(()=>document.querySelector('#resultName').textContent.includes('已完成'),null,{timeout:120000});
+  const id2=await page.locator('.job.active').getAttribute('data-job-id');created.push(id2);
+  assert.equal(await page.locator('#refineTabs').isHidden(),true);
+  await page.locator('#llmEnabled').click();
+  await page.waitForFunction(()=>!document.querySelector('#refineTabs').classList.contains('hidden'),null,{timeout:15000});
+  assert.equal(await page.locator('#retryRefine').isVisible(),true);
+  assert.equal(await page.locator('#retryRefine').textContent(),'生成 AI 内容');
+  await page.locator('#retryRefine').click();
+  await page.waitForFunction(()=>!document.querySelector('#copySummary').disabled&&document.querySelector('#refinedText').value.length>0,null,{timeout:120000});
+  assert.equal(await page.locator('#refinedText').inputValue(),'这是优化后的测试原文');
+  ok('9 disabled-AI job shows no tabs; enabling shows 生成 AI 内容 which generates');
+  // 10. no browser console errors during the whole flow
   assert.deepEqual(errors,[]);
-  ok('9 no browser console errors during the whole flow');
+  ok('10 no browser console errors during the whole flow');
   console.log('Browser refine check ALL '+passed+' PASS');
  }finally{
   if(page)for(const id of created){await page.request.post('http://127.0.0.1:18787/api/jobs/'+id+'/cancel').catch(()=>{});await page.request.delete('http://127.0.0.1:18787/api/jobs/'+id).catch(()=>{});}

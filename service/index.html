@@ -20,10 +20,10 @@
 <main id="appView" class="hidden"><div class="intro"><span class="eyebrow">VOICE TO WORDS</span><h1>留下声音，整理成文。</h1><p>选择手机中的录音文件，上传后自动转换为文字。</p></div><div class="layout"><div><section class="card"><h2>新建转写</h2><div class="drop" id="drop"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 24H8a6 6 0 0 1-1-12 9 9 0 0 1 17-1 6.5 6.5 0 0 1 0 13h-2M16 27V14m-5 5 5-5 5 5"/></svg><div><button class="primary" id="choose">选择录音文件</button></div><p>MP3 / M4A / WAV / WebM 等<br>每个文件最大 300 MB，最长 3 小时</p><input id="file" class="hidden" type="file" accept="audio/*,video/mp4,video/webm,.m4a,.mp3,.wav,.aac,.ogg,.opus,.flac,.amr"></div><div id="uploadMeter" class="meter hidden"><div id="uploadBar" style="width:0"></div></div><div id="uploadStatus" class="upload-status" role="status" aria-live="polite"></div><p class="hint">上传完成后可以关闭页面，稍后回来查看。<br>NAS 与电脑上的临时音频在转写后自动删除，文字记录保留 7 天。</p></section><section class="card computer-card"><h2>电脑加速</h2><p id="computerStatus" class="computer-status" role="status">正在检测电脑状态…</p><label class="toggle"><input id="computerEnabled" type="checkbox" checked>电脑可用时优先使用 GPU</label><details id="computerSettings"><summary>电脑地址设置</summary><label for="computerUrl">电脑局域网地址</label><input id="computerUrl" type="url" placeholder="http://192.168.1.73:18788" autocomplete="off"><div class="config-tools"><button id="saveComputer" class="primary">保存地址</button></div><p class="hint">电脑开机并运行转写服务时，任务自动优先使用电脑 GPU；关机或不可用时自动改用 NAS CPU。<br>内网单人使用，无需任何密钥。地址仅在电脑 IP 变化时才需要修改。</p></details></section><section class="card computer-card"><h2>AI 提炼</h2><p id="llmStatus" class="computer-status">正在读取 AI 提炼设置…</p><label class="toggle"><input id="llmEnabled" type="checkbox">转写完成后自动生成 AI 优化原文与内容概要</label><details id="llmSettings"><summary>API 设置</summary><label for="llmUrl">API 地址（OpenAI 兼容）</label><input id="llmUrl" type="url" autocomplete="off"><label for="llmModel">模型名称</label><input id="llmModel" type="text" autocomplete="off"><label for="llmKey">API Key</label><input id="llmKey" type="password" autocomplete="off"><div class="config-tools"><button id="saveLlm" class="primary">保存设置</button><button id="testLlm">测试连接</button></div><p class="hint">转写文字将发送到此地址对应的云端大模型；API Key 只保存在本机 NAS，不会出现在日志里。Key 留空表示保持已保存的 Key 不变。</p></details></section><section class="card history"><div class="history-title"><h2>转写记录</h2><button id="refresh" class="subtle">刷新</button></div><div id="jobs"><div class="empty">还没有转写记录</div></div><p class="history-note">点击记录查看全文 · 记录保留 7 天<br>时间按当前设备时区显示</p></section></div><section class="card" id="resultPanel" tabindex="-1"><button id="backRecords" class="subtle back-records">← 返回转写记录</button><div class="result-head"><h2>转写结果</h2><div class="tools"><button id="copy" disabled>复制</button><button id="download" disabled>下载 TXT</button><button id="cancel" class="danger" disabled>终止</button><button id="delete" class="danger" disabled>删除</button></div></div><div id="resultName" class="result-name">从左侧选择一条记录</div><dl id="resultMeta" class="result-meta hidden"></dl><div id="processMeter" class="meter hidden"><div id="processBar"></div></div><div id="refineTabs" class="tabs hidden"><button id="tabAi" type="button">AI 内容</button><button id="tabRaw" type="button">原文</button></div><div id="aiPane" class="hidden"><div class="block-head"><span>AI 优化原文</span><span class="ai-tag">AI 生成</span></div><textarea id="refinedText" class="result" readonly aria-label="AI 优化原文"></textarea><div class="block-head"><span>内容概要</span><span class="ai-tag">AI 生成</span><span class="block-tools"><button id="copySummary" disabled>复制</button><button id="downloadSummary" disabled>下载 TXT</button></span></div><textarea id="summaryText" class="result" readonly aria-label="内容概要"></textarea><p id="refineError" class="error-text hidden" role="alert"></p><button id="retryRefine" class="hidden">重新提炼</button></div><textarea id="result" class="result" readonly aria-label="转写结果" placeholder="文字会出现在这里。&#10;&#10;转写过程中，已识别的内容也会逐步显示。"></textarea><details class="task-logs" id="taskLogPanel"><summary>任务日志 · 调度与执行过程</summary><pre id="taskLogs">选择记录后显示任务日志</pre></details><div id="resultNote" class="result-note">自动识别中文、英文、粤语、日语和韩语。识别结果可能有误，重要内容请对照录音核对。</div></section></div></main>
 <div class="foot">声笺 · 你的声音，你的文字</div><div id="toast" class="toast hidden" role="status"></div>
 <script>
-const $=id=>document.getElementById(id);let selected=null,listing=[],busy=false,loggedIn=false,polling=false,toastTick,computerLoaded=false,llmLoaded=false,activeTab=null,currentJob=null;
+const $=id=>document.getElementById(id);let selected=null,listing=[],busy=false,loggedIn=false,polling=false,toastTick,computerLoaded=false,llmLoaded=false,llmReady=false,activeTab=null,currentJob=null;
 const labels={queued:'等待转写',converting:'处理音频',processing:'转写中',remote_upload:'发送到电脑',remote_processing:'电脑转写中',done:'已完成',error:'失败',cancelling:'终止中',cancelled:'已终止'};
 function toast(s){$('toast').textContent=s;$('toast').classList.remove('hidden');clearTimeout(toastTick);toastTick=setTimeout(()=>$('toast').classList.add('hidden'),4000)}
-function loginView(){loggedIn=false;computerLoaded=false;llmLoaded=false;$('loginView').classList.remove('hidden');$('appView').classList.add('hidden');$('logout').classList.add('hidden')}
+function loginView(){loggedIn=false;computerLoaded=false;llmLoaded=false;llmReady=false;$('loginView').classList.remove('hidden');$('appView').classList.add('hidden');$('logout').classList.add('hidden')}
 function appView(){loggedIn=true;if(!computerLoaded){computerLoaded=true;loadComputerSettings().then(()=>checkComputer()).catch(e=>computerMessage(e.message,false))}if(!llmLoaded){llmLoaded=true;loadLlmSettings().catch(e=>llmMessage(e.message,false))}$('loginView').classList.add('hidden');$('appView').classList.remove('hidden');$('logout').classList.remove('hidden')}
 async function api(url,opts={}){const r=await fetch(url,opts);let data;try{data=await r.json()}catch{throw Error('服务器暂时无法响应，请稍后重试')}if(!r.ok){if(r.status===401&&url!='/api/login')loginView();throw Error(typeof data.detail==='string'?data.detail:'请求失败，请稍后重试')}return data}
 async function health(){try{const h=await api('/api/health');$('health').textContent=h.ready?'转写服务就绪':h.failed?'识别服务暂不可用':'识别引擎准备中';$('dot').classList.toggle('wait',!h.ready)}catch{$('health').textContent='连接中断';$('dot').classList.add('wait')}}
@@ -68,19 +68,23 @@ async function loadDetail(){
 }
 function renderRefine(job){
   const refineActive=['running','done','failed'].includes(job.refine_status);
-  $('refineTabs').classList.toggle('hidden',!refineActive);
-  if(!refineActive){activeTab=null}else if(activeTab===null){activeTab='ai'}
-  const ai=refineActive&&activeTab==='ai';
-  $('tabAi').classList.toggle('active',ai);$('tabRaw').classList.toggle('active',refineActive&&!ai);
+  const canGenerate=job.status==='done'&&llmReady;
+  const tabsVisible=refineActive||canGenerate;
+  $('refineTabs').classList.toggle('hidden',!tabsVisible);
+  if(!tabsVisible){activeTab=null}else if(activeTab===null){activeTab='ai'}
+  const ai=tabsVisible&&activeTab==='ai';
+  $('tabAi').classList.toggle('active',ai);$('tabRaw').classList.toggle('active',tabsVisible&&!ai);
   $('aiPane').classList.toggle('hidden',!ai);
   $('result').classList.toggle('hidden',ai);
   $('refinedText').value=job.refined_text||'';
-  $('refinedText').placeholder=job.refine_status==='running'?'AI 提炼中，请稍候…':'AI 优化后的原文会出现在这里。';
+  $('refinedText').placeholder=job.refine_status==='running'?'AI 提炼中，请稍候…':job.refine_status==='none'?'尚未生成，点击下方按钮生成 AI 内容':'AI 优化后的原文会出现在这里。';
   $('summaryText').value=job.summary||'';
-  $('summaryText').placeholder=job.refine_status==='running'?'AI 提炼中，请稍候…':'精简概要会出现在这里。';
+  $('summaryText').placeholder=job.refine_status==='running'?'AI 提炼中，请稍候…':job.refine_status==='none'?'尚未生成，点击下方按钮生成 AI 内容':'精简概要会出现在这里。';
   const failed=job.refine_status==='failed';
   $('refineError').classList.toggle('hidden',!failed);$('refineError').textContent=failed?'AI 提炼失败：'+(job.refine_error||'未知原因'):'';
-  $('retryRefine').classList.toggle('hidden',!failed);
+  const showButton=ai&&job.status==='done'&&job.refine_status!=='running';
+  $('retryRefine').classList.toggle('hidden',!showButton);
+  $('retryRefine').textContent=job.refine_status==='none'?'生成 AI 内容':'重新提炼';
   const mainText=ai?$('refinedText'):$('result');
   $('copy').disabled=!mainText.value;$('download').disabled=job.status!=='done'||(ai&&job.refine_status!=='done');
   $('copySummary').disabled=job.refine_status!=='done';$('downloadSummary').disabled=job.refine_status!=='done';
@@ -110,13 +114,13 @@ $('tabAi').onclick=()=>{if(currentJob){activeTab='ai';renderRefine(currentJob)}}
 $('tabRaw').onclick=()=>{if(currentJob){activeTab='raw';renderRefine(currentJob)}};
 $('copySummary').onclick=async()=>{try{await navigator.clipboard.writeText($('summaryText').value);toast('已复制概要')}catch{toast('请长按概要文字复制')}};
 $('downloadSummary').onclick=()=>{if(selected)location.href='/api/jobs/'+selected+'/text?part=summary'};
-$('retryRefine').onclick=async()=>{if(!selected)return;try{await api('/api/jobs/'+selected+'/refine',{method:'POST'});toast('已开始重新提炼');await loadDetail()}catch(e){toast(e.message)}};
+$('retryRefine').onclick=async()=>{if(!selected)return;try{await api('/api/jobs/'+selected+'/refine',{method:'POST'});toast('已开始 AI 提炼');await loadDetail()}catch(e){toast(e.message)}};
 function llmMessage(m,ok){$('llmStatus').textContent=m;$('llmStatus').className='computer-status '+(ok?'ok':'warn')}
-async function loadLlmSettings(){const c=await api('/api/llm-config');$('llmEnabled').checked=c.enabled;$('llmUrl').value=c.base_url||'';$('llmModel').value=c.model||'';$('llmKey').value='';$('llmKey').placeholder=c.api_key_set?'已保存 '+c.api_key_masked+'，留空保持不变':'填写 API Key'}
+async function loadLlmSettings(){const c=await api('/api/llm-config');llmReady=c.enabled&&c.api_key_set;$('llmEnabled').checked=c.enabled;$('llmUrl').value=c.base_url||'';$('llmModel').value=c.model||'';$('llmKey').value='';$('llmKey').placeholder=c.api_key_set?'已保存 '+c.api_key_masked+'，留空保持不变':'填写 API Key'}
 async function saveLlmSettings(){return api('/api/llm-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$('llmEnabled').checked,base_url:$('llmUrl').value,model:$('llmModel').value,api_key:$('llmKey').value})})}
-$('llmEnabled').onchange=async()=>{try{await saveLlmSettings();toast('已保存 AI 提炼设置')}catch(e){llmMessage(e.message,false)}};
-$('saveLlm').onclick=async()=>{try{await saveLlmSettings();toast('AI 提炼设置已保存')}catch(e){llmMessage(e.message,false)}};
-$('testLlm').onclick=async()=>{try{await saveLlmSettings();const r=await api('/api/llm-config/test',{method:'POST'});llmMessage(r.message,r.ok)}catch(e){llmMessage(e.message,false)}};
+$('llmEnabled').onchange=async()=>{try{const c=await saveLlmSettings();llmReady=c.enabled&&c.api_key_set;if(selected)await loadDetail();toast('已保存 AI 提炼设置')}catch(e){llmMessage(e.message,false)}};
+$('saveLlm').onclick=async()=>{try{const c=await saveLlmSettings();llmReady=c.enabled&&c.api_key_set;if(selected)await loadDetail();toast('AI 提炼设置已保存')}catch(e){llmMessage(e.message,false)}};
+$('testLlm').onclick=async()=>{try{const c=await saveLlmSettings();llmReady=c.enabled&&c.api_key_set;const r=await api('/api/llm-config/test',{method:'POST'});llmMessage(r.message,r.ok)}catch(e){llmMessage(e.message,false)}};
 
 health();refresh();setInterval(health,15000);setInterval(()=>{if(loggedIn&&!document.hidden)refresh()},3000);setInterval(()=>{if(loggedIn&&!document.hidden)checkComputer()},15000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){health();if(loggedIn){refresh();checkComputer()}}});
 </script>
