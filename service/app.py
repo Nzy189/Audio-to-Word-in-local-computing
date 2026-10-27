@@ -444,7 +444,10 @@ def worker():
                     with cancel_lock:
                         cancel_flags.pop(job["id"], None)
                     active_job = None
-                maybe_refine(job["id"])
+                try:
+                    maybe_refine(job["id"])
+                except Exception:
+                    log.exception("AI 提炼调度失败，不影响转写任务 | 任务ID=%s", job["id"])
             else:
                 stop.wait(1)
     except Exception:
