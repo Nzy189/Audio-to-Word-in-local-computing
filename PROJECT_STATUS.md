@@ -2,32 +2,34 @@
 
 > **这是本项目唯一的开发状态主文档。后续继续开发、排障或部署，先读本文件。**
 >
-> 更新日期：2026-10-26，用户时区 Asia/Dubai（UTC+04:00）。
-> 最近一次运行验证：**2026-10-25**，各目标的最后确认状态见下表；本次仅核对源码与文档，未重新检查运行服务。
+> 更新日期：2026-10-27，用户时区 Asia/Dubai（UTC+04:00）。
+> 最近一次运行验证：**2026-10-27**，1.5.0 镜像提炼 QA、真实 GPU 回归与发布打包核验；各目标的最后确认状态见下表。本次未触碰生产容器、电脑 GPU 服务与物理 NAS。
 > 项目目录：`F:\Codex Project\atow`。
 
 ## 1. 先看当前进度
 
-**1.4（免密钥电脑加速）已构建、验证并交付安装包；电脑 GPU 服务已重启到免密钥新版并实测通过；物理 NAS 仍是旧版，待用户导入 1.4 镜像。**
+**1.5（AI 提炼 + 识别调优）已构建、通过全部 QA 并交付安装包；电脑 GPU 服务仍运行 1.4 代码，1.5 调优需重启后才生效；物理 NAS 仍是旧版，待用户导入 1.5 镜像。**
 
 **当前源码已删除 NAS↔电脑的连接密钥校验。** NAS 客户端不发送 Authorization，电脑服务不读取 `WORKER_TOKEN`，健康检查、上传、轮询和取消均无需连接密钥。网页无需导入 `computer-connection.json`，默认电脑地址已内置，只保留在线状态、GPU 优先开关与地址修改。NAS 网页的 `ACCESS_CODE` 登录口令和会话校验仍保留。下文 1.2/1.3 的密钥与导入流程仅为历史记录，不作为当前操作步骤。
 
+**1.5 新增 AI 提炼与识别调优。** 转写完成后 NAS 端调用 OpenAI 兼容 API（默认百炼专属端点 + kimi-k3）生成优化正文与要点概要；`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_ENABLED` 环境变量与网页“AI 提炼设置”卡片为双通道配置，网页保存的配置随时覆盖环境变量；详情页提供 AI 内容 / 原文双页签（默认 AI），提炼失败可重新提炼，**原始转写永远保留**。识别链路针对噪声录音调优：FFmpeg highpass/lowpass 滤镜、Silero VAD 0.6、FSMN `speech_noise_thres` 0.75；调优参数尚未经真实录音 A/B 验证。另修复网页首屏未登录 401 探测与 favicon 404 控制台报错。
+
 | 对象 | 已完成 / 最后确认状态 | 仍需注意 |
 | --- | --- | --- |
-| 本地源码 | 1.4：去掉 NAS↔电脑密钥校验、默认电脑地址内置、网页只显示在线状态、保留地址修改与 CPU 回退；1.3 其余功能保留 | 语法检查、14 项 QA、真实 GPU 回路全部通过（2026-10-25） |
-| 最新发布物 | `dist/shengjian-1.4.zip`；镜像 `shengjian:1.4.0-arm64` | 已构建、验证；**不再包含 computer-connection.json**；不能据此推断已安装到 NAS |
-| Windows RTX 5080 服务 | 已重启运行免密钥新版（2026-10-25 22:00 前后，PID 23524）；无密钥健康检查、真实转写回路、GPU 终止均实测通过 | 在用户登录 Windows 后自启；升级期间发现服务曾停止，现已恢复运行 |
+| 本地源码 | 1.5：AI 提炼（NAS 端 OpenAI 兼容 API、env+网页双通道、详情页双页签、失败重提）、识别链路降噪调优、网页首屏控制台报错修复；1.4 免密钥等其余功能保留 | 单测 9/9、容器 Phase A 3/3 + Phase B 7/7、浏览器 9/9、真实 GPU 回归 7+4 全部通过（2026-10-27） |
+| 最新发布物 | `dist/shengjian-1.5.zip`；镜像 `shengjian:1.5.0-arm64` | 已构建、验证；**不含任何 API Key，也不含 computer-connection.json**；不能据此推断已安装到 NAS |
+| Windows RTX 5080 服务 | **仍运行 1.4 代码**（2026-10-25 重启的免密钥版，实测通过）；1.5 调优需重启服务后生效 | 重启前先确认健康接口非 busy、进程命令行指向本项目；由控制器与用户协调执行，不要擅自操作 |
 | Windows 防火墙 | `Shengjian-GPU-LAN-18788` 规则已启用，允许本地子网 TCP 18788 | 用户已实际执行管理员脚本，不要反复要求其再次放行 |
-| 物理极空间 NAS | 用户已运行旧版；网页和健康接口均可访问；此前确认具有 1.2 混合版界面 | **未升级 1.4**；导入 1.4 前仍走 NAS CPU（1.2 从未配置电脑地址） |
-| ECS | 网页健康检查正常；最后通过 SSH 部署的是转写记录版 `atow-transcriber:records-v2` | 后续 NAS 1.1～1.4 功能没有自动同步部署到 ECS |
+| 物理极空间 NAS | 用户已运行旧版；网页和健康接口均可访问；此前确认具有 1.2 混合版界面 | **未升级 1.5**；导入 1.5 前仍走 NAS CPU（1.2 从未配置电脑地址） |
+| ECS | 网页健康检查正常；最后通过 SSH 部署的是转写记录版 `atow-transcriber:records-v2` | 后续 NAS 1.1～1.5 功能没有自动同步部署到 ECS |
 
 ### 下一步从这里继续
 
-1. 用户在极空间导入 `dist/shengjian-1.4/shengjian-z2pro-arm64.tar`（镜像 `shengjian:1.4.0-arm64`），**继续挂载原 `/data` 文件夹，保持 18088 → 8787，保留原 `ACCESS_CODE`**；无需再导入任何电脑配置文件。
-2. 检查 NAS `http://192.168.1.66:18088/api/health` 返回 `"version":"1.4.0"`。
-3. 登录 NAS 网页，确认“电脑加速”卡片显示“电脑在线，将优先使用 GPU 转写（NVIDIA GeForce RTX 5080 GPU）”。
-4. 用一段短录音验证：任务默认走 RTX 5080（backend=remote_gpu、FunASR CUDA），NAS 与电脑临时音频均已删除。
-5. 可选：电脑关机时上传一条任务，验证自动回退 NAS CPU 且日志给出具体原因。
+1. 重启电脑 GPU 服务到 1.5 代码（与用户确认后执行）：先查 `http://192.168.1.73:18788/v1/health` 确认非 `busy`，核对监听 18788 的进程命令行含 `worker\server.py` 再停止，用 `worker/start-worker.ps1` 重新启动并复核健康接口 ready。
+2. 用户在极空间导入 `dist/shengjian-1.5/shengjian-z2pro-arm64.tar`（镜像 `shengjian:1.5.0-arm64`），**继续挂载原 `/data` 文件夹，保持 18088 → 8787，保留原 `ACCESS_CODE`**；无需再导入任何电脑配置文件。
+3. 检查 NAS `http://192.168.1.66:18088/api/health` 返回 `"version":"1.5.0"`。
+4. 配置 AI 提炼：在 NAS `nas.env` 取消注释 `LLM_API_KEY` 并填入 Key（包内模板已给出其余默认项），或登录网页在“AI 提炼设置”卡片中配置并测试连接；随后上传一段短录音，确认详情页默认显示 AI 内容页签、可切回原文、概要可复制/下载。
+5. 用此前“噪声大”的真实录音做 A/B 对照验收（对照 1.4 时代的记录比较错别字、口水词、无意义输出）；若识别质量变差，按第 12 节单独回滚调优参数，不影响 AI 提炼功能。
 6. 将结果和检查时间更新到本文件。**不要把 Docker Desktop ARM64 模拟验证写成 Z2 Pro 实机验证。**
 
 ## 2. 用户已经确定的需求
@@ -39,7 +41,7 @@
 - **NAS 与电脑的音频通信优先走局域网，不走 Tailscale。** 手机在外访问 NAS 可以继续用 Tailscale。
 - 处理完成后删除两端录音与临时文件；失败与终止也要清理。电脑离线时，其残留只能在下次服务启动时清理，不能声称已经远程删除。
 - 日志必须说明任务名、开始时间、实际设备/引擎，尤其是为什么没有使用电脑。不能只输出“引擎已就绪”。
-- 用户不熟悉远程环境变量，不应要求其手动填写 URL/token。当前 1.4 **无需密钥、无需导入电脑配置文件**；网页自动检测电脑状态，电脑 IP 改变时在网页修改地址即可。1.3 的导入/测试流程已被替代。
+- 用户不熟悉远程环境变量，不应要求其手动填写 URL/token。当前版本（1.4 起）**无需密钥、无需导入电脑配置文件**；网页自动检测电脑状态，电脑 IP 改变时在网页修改地址即可。1.3 的导入/测试流程已被替代。
 - 用户提出暂停或终止；当前实现**终止**，没有实现暂停/断点恢复。
 - 保留已有转写记录，不中断或清空用户正在运行的业务。
 
@@ -116,37 +118,45 @@ GPU 服务一次处理一个任务；未就绪、忙碌或空闲显存不足时 
 
 ## 5. 最新发布物与文件地图
 
-### 最新 1.4 发布物
+### 最新 1.5 发布物
 
 ```text
-F:\Codex Project\atow\dist\shengjian-1.4.zip
-F:\Codex Project\atow\dist\shengjian-1.4\shengjian-z2pro-arm64.tar
-F:\Codex Project\atow\dist\shengjian-1.4\nas.env
-F:\Codex Project\atow\dist\shengjian-1.4\README.md
-F:\Codex Project\atow\dist\shengjian-1.4\BUILD-INFO.json
-F:\Codex Project\atow\dist\shengjian-1.4\SHA256SUMS.txt
+F:\Codex Project\atow\dist\shengjian-1.5.zip
+F:\Codex Project\atow\dist\shengjian-1.5\shengjian-z2pro-arm64.tar
+F:\Codex Project\atow\dist\shengjian-1.5\nas.env
+F:\Codex Project\atow\dist\shengjian-1.5\README.md
+F:\Codex Project\atow\dist\shengjian-1.5\BUILD-INFO.json
+F:\Codex Project\atow\dist\shengjian-1.5\SHA256SUMS.txt
 ```
 
-- ZIP：274,298,562 字节，约 261.6 MiB。
-- ZIP SHA-256：`dc50ff192314d90ea78355f76453409355e49e5663f16ad446adbdb0c43985df`。
-- Docker 镜像标签：`shengjian:1.4.0-arm64`，tar manifest 已核查为 arm64。
-- 镜像内包含模型、VAD、FFmpeg；不内置用户网页口令。包内不再有 `computer-connection.json`（免密钥后无需导入任何配置）；`nas.env` 含网页口令，不要公开分享整个个人安装包。
+- ZIP：274,942,668 字节，约 262.2 MiB；SHA-256 `5654218f290ebe2cd08b708e4dac9114e68fd0c41add369e01d2d22da5ba6f7e`。
+- 镜像 tar：275,776,000 字节，SHA-256 `f4fecbf58e074582cf19acd0d725e009cfad976483e80078c60aa20bffd08b8f`。
+- Docker 镜像标签：`shengjian:1.5.0-arm64`；`docker load -i` 核验输出 `Loaded image: shengjian:1.5.0-arm64`，`docker image inspect` 确认架构 arm64。
+- ZIP 解压核验：14/14 个文件与源目录一致，解压后 tar 的 SHA-256 与源一致。
+- 镜像内包含模型、VAD、FFmpeg；不内置用户网页口令，也**不含任何 API Key**；包内无 `computer-connection.json`（免密钥后无需导入任何配置）。`nas.env` 含网页口令并附注释掉的 `LLM_*` 模板行（默认端点与 kimi-k3，Key 留空），不要公开分享整个个人安装包。
+- `SHA256SUMS.txt` 覆盖包内 13 个文件（与 1.4 相同的文件集与格式），`sha256sum -c` 全部 OK。
+- 包内 `windows-worker/server.py` 与当前 `worker/server.py` 逐字节一致（含 1.5 调优参数）。
 
-旧发布物 `dist/shengjian-1.3.zip`（1.3）、`dist/shengjian-z2pro-arm64.zip`（1.1）、`dist/shengjian-hybrid-1.2.zip` 仅供历史参考。`atow-source.tgz` 也是较早的源码快照，**不要当成当前源码**。
+旧发布物 `dist/shengjian-1.4.zip`（1.4）、`dist/shengjian-1.3.zip`（1.3）、`dist/shengjian-z2pro-arm64.zip`（1.1）、`dist/shengjian-hybrid-1.2.zip` 仅供历史参考。`atow-source.tgz` 也是较早的源码快照，**不要当成当前源码**。
 
 ### 源码地图（以下路径相对于项目目录）
 
 | 文件 / 目录 | 职责 |
 | --- | --- |
-| `service/app.py` | FastAPI、认证、SQLite、任务调度、本地 CPU、电脑地址设置（默认内置）、状态检测、事件日志、终止与清理 |
+| `service/app.py` | FastAPI、认证、SQLite、任务调度、本地 CPU、电脑地址设置（默认内置）、状态检测、事件日志、终止与清理、AI 提炼挂接与设置接口 |
+| `service/llm_refine.py` | AI 提炼客户端：OpenAI 兼容 API 调用、Key 掩码、超时与重试、结果解析（优化正文 + 要点概要） |
 | `service/remote_worker.py` | LAN 电脑客户端（无密钥）、分类型连接失败、流式发送、状态轮询、取消和结果确认 |
-| `service/index.html` | 手机适配单页：上传、电脑在线状态显示、地址修改、历史、详情、日志、终止、下载 |
+| `service/index.html` | 手机适配单页：上传、电脑在线状态显示、地址修改、AI 提炼设置卡、历史、详情（AI 内容/原文双页签）、日志、终止、下载 |
 | `service/requirements.txt` | NAS/ECS Python 依赖版本固定 |
 | `service/Dockerfile` | ECS 应用构建，监听 127.0.0.1:8787；不能直接代替 NAS Dockerfile |
 | `deploy/nas/Dockerfile` | ARM64 NAS 镜像，内置模型、0.0.0.0:8787、健康检查、无 ANSI 色彩 |
 | `deploy/nas/entrypoint.py` | 准备专用数据目录所有者，随后降为非 root 用户 |
 | `deploy/nas/compose.yaml` | NAS 部署配置，18088 → 8787、原数据目录、资源限制 |
 | `deploy/nas/README.md` | 当前 NAS 用户安装/升级步骤；开发进度仍以本文件为准 |
+| `deploy/nas/stub-llm.py` | 1.5 QA 用容器内 stub OpenAI 兼容服务，不是产品组件 |
+| `deploy/nas/verify-refine.py` | 1.5 AI 提炼两阶段容器验证脚本 |
+| `deploy/nas/browser-refine-check.cjs` | 1.5 提炼浏览器 QA 脚本 |
+| `tests/test_llm_refine.py` | 提炼客户端单测（9 项检查） |
 | `worker/server.py` | 原生 Windows HTTP GPU 服务、模型与 VAD、任务取消、临时文件清理 |
 | `worker/start-worker.ps1` | 隐藏窗口启动，检测 18788 避免重复启动 |
 | `worker/install-startup.ps1` | 当前用户登录自启快捷方式 |
@@ -155,7 +165,7 @@ F:\Codex Project\atow\dist\shengjian-1.4\SHA256SUMS.txt
 | `deploy/atow-*.service`、`*.timer` | ECS 运行时与 HTTPS 续期 |
 | `build-assets/models/` | 构建用模型文件，已忽略，不是业务录音 |
 | `test-results/` | 公开样例与测试截图，已忽略，不打入镜像 |
-| `dist/` | 历史/当前发布包，已忽略；最新是 1.4 |
+| `dist/` | 历史/当前发布包，已忽略；最新是 1.5 |
 
 ## 6. 配置、凭据与持久化
 
@@ -164,13 +174,14 @@ F:\Codex Project\atow\dist\shengjian-1.4\SHA256SUMS.txt
 | 数据 | 存放位置 | 说明 |
 | --- | --- | --- |
 | NAS 网页访问口令 | 当前容器 `ACCESS_CODE`；个人发布目录 `nas.env` | 手动创建容器不会自动加载该文件，仍需填写这一个必填变量 |
+| AI 提炼 API Key | `nas.env` 的 `LLM_API_KEY`（初始默认）或 `/data/jobs.sqlite3` 的 `settings` 表（网页“AI 提炼设置”保存后覆盖 env） | 不写入本文件；网页与接口只显示掩码；无 Key 时提炼自动关闭，转写不受影响 |
 | PC 服务连接密钥 | **1.4 起不再使用**；即使旧配置仍有 `WORKER_TOKEN`，当前代码也不读取 | 无需填写或恢复；旧版本文件可能仍有历史字段 |
 | NAS 电脑地址设置 | `/data/jobs.sqlite3` 的 `settings` 表（1.4 起仅存地址与开关，不再存密钥） | 默认地址 `http://192.168.1.73:18788` 已内置，无需导入任何文件 |
 | NAS 会话签名密钥 | `/data/.session-secret` | 自动生成并持久化，权限 0600；升级/备份时保留 |
 | ECS 应用凭据 | `/opt/atow/app.env` | root 只读权限 0600；并不包含 SSH 密码 |
 | ECS SSH 登录密码 | 未写入项目文档 | 不能把网页口令拿去当 SSH 密码 |
 
-旧参数 `REMOTE_WORKER_URL` 仍兼容（作为默认地址覆盖）；`REMOTE_WORKER_TOKEN` 在 1.4 起不再使用。
+旧参数 `REMOTE_WORKER_URL` 仍兼容（作为默认地址覆盖）；`REMOTE_WORKER_TOKEN` 在 1.4 起不再使用。1.5 新增 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_ENABLED` 环境变量（仅作初始默认值，默认百炼专属端点 + kimi-k3），网页“AI 提炼设置”保存后随时覆盖；发布包 `nas.env` 中这些行为注释掉的模板。
 
 NAS 内部的数据包括：
 
@@ -217,7 +228,7 @@ queued → remote_upload → remote_processing → done
 
 ## 8. 已完成的开发里程碑
 
-以下均为 2026-10-25 的开发过程，版本顺序优先于旧文档段落顺序：
+以下按版本顺序记录开发过程（1.4 及之前为 2026-10-25，1.5 为 2026-10-27），版本顺序优先于旧文档段落顺序：
 
 | 阶段 | 完成内容 | 实际交付 / 验证 |
 | --- | --- | --- |
@@ -229,12 +240,13 @@ queued → remote_upload → remote_processing → done
 | 可观测 1.3 | 网页导入/测试电脑连接、按任务读取配置、具体失败原因、详细任务日志、无 ANSI 颜色 | 配置缺失、错误密钥、端口拒绝、重启持久化、实际 GPU 转写验证 |
 | 终止 1.3 | 排队/CPU/GPU 终止、清理后终态、重启恢复、取消/断线竞争处理 | 公开样例合成一小时录音，实际 GPU 终止及下一任务验证，手机按钮验证 |
 | 免密钥 1.4 | 去掉 NAS↔电脑密钥校验；默认电脑地址内置；网页改为在线状态显示（15 秒自动刷新），仅保留地址修改；CPU 回退与终止逻辑不变 | 语法检查、无密钥真实 GPU 回路、14 项 QA（零配置直连/回退原因/重启保留/日志/排队与 CPU/GPU 终止/浏览器状态卡与手机布局）全部通过；1.4 镜像与 ZIP 已构建交付 |
+| AI 提炼 1.5 | NAS 端 OpenAI 兼容 API 提炼（默认百炼专属端点 + kimi-k3）、`LLM_*` env + 网页设置双通道、详情页 AI 内容/原文双页签（默认 AI）、失败重新提炼、原始转写永久保留；识别链路降噪调优（FFmpeg highpass/lowpass、Silero 0.6、`speech_noise_thres` 0.75）；网页首屏 401/favicon 控制台报错修复 | 单测 9/9；隔离 ARM64 QA 容器 Phase A 3/3、Phase B 7/7、浏览器 9/9；真实 RTX 5080 回归 7+4；1.5 镜像与 ZIP 已构建交付（2026-10-27）。电脑服务重启与真实录音 A/B 验收待用户参与 |
 
 ## 9. 测试、证据与测试边界
 
 ### 已通过
 
-以下运行测试均为历史验证。2026-10-26 本次只做源码与文档静态核对：确认 `service/remote_worker.py` 不发送 Authorization，`worker/server.py` 不读取连接密钥且请求处理无密钥校验，网页没有配置导入或密钥输入控件；确认 `service/app.py` 仍保留网页登录与会话校验。已修正文档中的旧导入步骤、旧服务状态和版本描述；未重建发布物、未重启服务、未执行转写测试。
+以下运行测试均为历史验证。2026-10-27 本次为 1.5 发布：在最终镜像 `shengjian:1.5.0-arm64` 上完成 AI 提炼 QA（单测、Phase A/B、浏览器）与真实 RTX 5080 回归，并完成发布打包核验（docker load、架构、ZIP 解压、包内无密钥扫描）；全程使用隔离 QA 容器与临时卷，未触碰生产容器、电脑 GPU 服务与物理 NAS。
 
 - ECS：真实 HTTPS 证书、中文/英文、M4A/MP3/WebM/WAV、静音/错误音频、TXT、音频删除、手机布局。
 - ARM64：真实 ARM64 镜像和 Python、归档导入、内置模型、HTTP 认证、会话和记录重启保留。
@@ -251,6 +263,15 @@ queued → remote_upload → remote_processing → done
   - `browser-settings-check.cjs` 3 项 PASS：零配置状态卡显示电脑在线（默认地址）、任务元数据/日志/TXT 下载/手机布局、终止后状态与设置持久化、无浏览器错误。
   - 打包核验：tar manifest 架构 arm64、ZIP 完整性 OK、包内无 computer-connection.json、包内 worker 代码无密钥逻辑。
   - QA 容器 `atow-logs-qa` 与临时卷已清理；电脑 GPU 服务保持运行（免密钥新版）。
+- 1.5 AI 提炼与调优（2026-10-27，Docker Desktop ARM64 模拟 + 真实 RTX 5080 回归）：
+  - 单测 `tests/test_llm_refine.py` 9/9：普通/围栏/前缀 JSON 解析、垃圾响应与 HTTP 500 重试、401 不重试、超时、缺配置、非对象 JSON。
+  - `verify-refine.py a`（容器不带 LLM 环境变量）3 项 PASS：1.4 旧 schema 库自动迁移且旧记录可读、env 未配置时取默认值（默认端点/kimi-k3/无 Key）、无 Key 不触发提炼。
+  - `verify-refine.py b`（stub LLM 服务）7 项 PASS：env 全链路（Key 掩码、自动提炼、refined_text/summary 精确匹配、事件含“提炼”）、网页覆盖与解析失败路径、失败后重新提炼、提炼中并发请求 409、网页关闭开关不提炼、refined/summary/original 三种下载、容器外网连通真实模型端点。
+  - `browser-refine-check.cjs` 9 项 PASS：AI 设置卡（开关/地址/模型/Key/测试连接）、UI 保存与连接测试、上传自动提炼、详情页默认 AI 页签且标注 AI 生成、原文页签切换、概要复制/下载、390px 无横向溢出、页签卡片布局正常、全程无控制台报错。
+  - 回归：`verify-observability.py` 7 项 PASS、`verify-cancellation.py` 4 项 PASS（零配置直连真实 RTX 5080、回退原因、重启保留、排队/CPU/GPU 终止与双端清理）。
+  - 期间发现并修复网页首屏未登录 401 探测与 favicon 404 控制台报错（提交 `d67ff66`），修复后重建镜像并从 Phase A 起全量重跑，以上证据均出自修复后镜像。
+  - 打包核验：`docker load -i` 输出 `Loaded image: shengjian:1.5.0-arm64`、镜像架构 arm64、ZIP 解压 14/14 文件且解压后 tar 哈希与源一致、包内文本无任何 API Key 且无 `computer-connection.json`。
+  - QA 容器 `atow-logs-qa` 与临时卷已清理；**电脑 GPU 服务未重启，仍运行 1.4 代码**。
 
 一次取消测试观察到 CPU 清理约 0.7 秒、真实 GPU 清理约 1.5 秒，仅是该测试结果，不是所有设备的响应保证。
 
@@ -271,12 +292,16 @@ queued → remote_upload → remote_processing → done
 | `deploy/nas/verify-cancellation.py` | 排队/本机/实际 GPU 终止与音频清理，使用公开合成的一小时 WAV |
 | `deploy/nas/verify-cancel-race.py` | 取消与断线竞争、重启恢复，隔离临时数据库 |
 | `deploy/nas/browser-settings-check.cjs` | 当前 1.4 无导入/无密钥状态卡、任务日志、终止、下载与手机 QA；会重置隔离 QA 的设置 |
+| `deploy/nas/stub-llm.py` | QA 用容器内 stub OpenAI 兼容服务（按 model 名分流正常/垃圾响应/500/延迟），不是产品组件 |
+| `deploy/nas/verify-refine.py` | 1.5 AI 提炼两阶段容器验证（`a`：无 env 默认与旧库迁移；`b`：stub 全链路），需要隔离 QA 容器 |
+| `deploy/nas/browser-refine-check.cjs` | 1.5 AI 设置卡、双页签、概要复制/下载与手机 QA；会重置隔离 QA 的设置 |
+| `tests/test_llm_refine.py` | 提炼客户端单测（9 项：解析变体、重试、401 不重试、超时、缺配置、非对象 JSON） |
 
 **不要把测试脚本中的 QA 容器名改成用户的生产容器直接执行。** 测试会上传/删除任务，部分还会重启容器、清空 QA 连接设置。应先阅读脚本中的固定端口、名称、路径和测试前置条件。
 
 本次测试容器 `atow-logs-qa`、`atow-hybrid-qa`、`atow-fallback-qa` 及对应临时卷已清理；电脑 GPU 服务有意保持运行。模型与发布包保留。
 
-测试截图在 `test-results/`，主要是 `settings-and-task-logs.png`、`cancelled-task.png`，不含真实用户转写内容或明文密钥。
+测试截图在 `test-results/`，主要是 `settings-and-task-logs.png`、`cancelled-task.png`、`refine-browser.png`（1.5 提炼浏览器 QA 全页截图），不含真实用户转写内容或明文密钥。
 
 ## 10. 运维与重建速查
 
@@ -286,11 +311,11 @@ queued → remote_upload → remote_processing → done
 Invoke-RestMethod 'http://192.168.1.66:18088/api/health'
 ```
 
-1.4 应返回 `version: 1.4.0`。健康接口显示 ready 不等于电脑加速已经连通；后者看网页“电脑加速”状态卡。
+1.5 应返回 `version: 1.5.0`（物理 NAS 升级前仍返回旧版本）。健康接口显示 ready 不等于电脑加速已经连通；后者看网页“电脑加速”状态卡。
 
 ### 检查电脑 GPU 服务
 
-1.4 起电脑服务不再需要密钥；2026-10-25 已确认电脑服务重启到免密钥新版。可用以下请求检查当前状态：
+电脑服务不需要密钥；**截至 2026-10-27 仍运行 2026-10-25 重启的 1.4 代码，1.5 调优需再次重启后生效**。可用以下请求检查当前状态：
 
 ```powershell
 Invoke-RestMethod 'http://192.168.1.73:18788/v1/health'
@@ -313,18 +338,18 @@ Invoke-RestMethod 'http://192.168.1.73:18788/v1/health'
 
 ```powershell
 docker buildx build --platform linux/arm64 --load --provenance=false `
-  --tag shengjian:1.4.0-arm64 --file deploy/nas/Dockerfile .
+  --tag shengjian:1.5.0-arm64 --file deploy/nas/Dockerfile .
 
 docker buildx build --platform linux/arm64 --provenance=false `
-  --tag shengjian:1.4.0-arm64 --file deploy/nas/Dockerfile `
-  --output type=docker,dest=dist/shengjian-1.4/shengjian-z2pro-arm64.tar .
+  --tag shengjian:1.5.0-arm64 --file deploy/nas/Dockerfile `
+  --output type=docker,dest=dist/shengjian-1.5/shengjian-z2pro-arm64.tar .
 ```
 
 需要 Docker Desktop 的 Linux 引擎运行，已核查支持 ARM64 模拟。NAS 构建上下文是项目根目录。`build-assets/models/` 必须存在；其内容为 SenseVoice INT8 模型、tokens、许可证和 Silero VAD。
 
 升级版本时同步镜像标签、`compose.yaml`、`app.py` 健康接口版本、发布目录和 BUILD-INFO。导出使用 `type=docker`、关闭 provenance，避免把仅适合新引擎的归档格式交给旧 NAS。
 
-打 ZIP 前同步用户 README、Compose、Windows 文件；1.4 起不再生成或包含 `computer-connection.json`，`windows-worker/worker.env` 为无密钥的注释模板。重算 `SHA256SUMS.txt`，验证镜像 manifest/架构和 ZIP 完整性。文档摘要校验值随实际发布物更新，已发布的包不要仅因文档整理而重写。
+打 ZIP 前同步用户 README、Compose、Windows 文件；1.4 起不再生成或包含 `computer-connection.json`，`windows-worker/worker.env` 为无密钥的注释模板。1.5 起 `nas.env` 另附注释掉的 `LLM_*` 模板行（Key 留空，不写入任何真实 Key）。重算 `SHA256SUMS.txt`，验证镜像 manifest/架构和 ZIP 完整性。文档摘要校验值随实际发布物更新，已发布的包不要仅因文档整理而重写。
 
 ### ECS 运维（仅在需要处理 ECS 时）
 
@@ -342,10 +367,10 @@ ECS 原启动/网关/证书文件均在 `/opt/atow`，主要容器为 `atow-app`
 
 | 问题 | 已定位原因 / 处理 |
 | --- | --- |
-| 容器启动提示 `Set ACCESS_CODE...` | 手动创建未设置网页口令，镜像不会自动读取旁边的 nas.env；当前 1.4 仍需这个网页口令，与已删除的电脑连接密钥无关 |
+| 容器启动提示 `Set ACCESS_CODE...` | 手动创建未设置网页口令，镜像不会自动读取旁边的 nas.env；当前版本仍需这个网页口令，与已删除的电脑连接密钥无关 |
 | 网页端口冲突或访问不到 | 18080 被占用；用户实际选了 18088。不要再拿旧建议 18081 做检查 |
 | GPU 0%，NAS 在跑，电脑明明开机 | 当时 PC 健康 ready，NAS 任务直接 local_cpu 且 worker_note 为空，说明 1.2 没有启用远程配置；用户明确说没有填写那两个变量 |
-| 用户不理解 URL/token | 当前 1.4 已删除电脑连接密钥校验并内置默认地址，无需导入配置；网页自动检测状态，仅在 IP 改变时修改地址，回退原因写入日志 |
+| 用户不理解 URL/token | 当前版本（1.4 起）已删除电脑连接密钥校验并内置默认地址，无需导入配置；网页自动检测状态，仅在 IP 改变时修改地址，回退原因写入日志 |
 | 日志只有引擎就绪且有 `[32m` 乱码 | 已加入逐任务日志，Uvicorn 使用 `--no-use-colors` |
 | PC 保存结果时 WinError 17 | 曾在同目录 `os.replace` 出错，已对 Windows 错误 17 做 copy+unlink 兼容；具体文件系统原因未进一步确认，不要随意移除该兼容处理 |
 | Docker 向 readonly/tmpfs 的 `/tmp` 复制测试文件失败 | 改用 `docker exec -i` 将测试字节写入临时文件，不能据此判断业务上传失败 |
@@ -357,7 +382,8 @@ ECS 原启动/网关/证书文件均在 `/opt/atow`，主要容器为 `atow-app`
 
 尚未实现或未确认：
 
-- 物理 Z2 Pro 升级 1.4，以及 NAS 实机 → PC 的免密钥闭环联调；无需连接配置导入。
+- 物理 Z2 Pro 升级 1.5，以及 NAS 实机 → PC 的免密钥闭环联调与 AI 提炼实机验证；无需连接配置导入。
+- 电脑 GPU 服务重启到 1.5 代码（调优参数重启后才生效），以及真实噪声录音的 A/B 对照验收；调优参数（FFmpeg 滤镜、Silero 0.6、`speech_noise_thres` 0.75）尚未用真实录音验证。若实测识别质量变差：单独回滚调优参数（`speech_noise_thres` 回 0.6、Silero 回 0.5、去掉 `-af` 滤镜）重建重测，不影响 AI 提炼功能。
 - 同一份长录音在 Z2 Pro、ECS、RTX 5080 的严格对照基准。
 - 暂停、断点续跑、任务跨重启续算；目前普通任务重启会重新处理。
 - 自动 LAN 设备发现；当前靠固定地址/网页修改，建议 DHCP 地址保留。不要声称地址变化已自动发现。
