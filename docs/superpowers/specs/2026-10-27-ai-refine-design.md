@@ -105,7 +105,7 @@ JSON 结构：`{"enabled": bool, "base_url": str, "model": str, "api_key": str}`
 | `worker/server.py` FFmpeg 命令 | 加 `-af "highpass=f=80,lowpass=f=7500"` |
 | `service/app.py` 本机 FFmpeg 转换 | 同上 |
 | GPU 侧 FSMN VAD（`vad_kwargs`） | 噪声判定阈值调严一档（参数名与取值实现时对照 FunASR 文档/源码验证，从默认约 0.5 提至约 0.65） |
-| NAS 侧 Silero VAD | `threshold` 0.5 → 0.6（[service/app.py:246](../../service/app.py)） |
+| NAS 侧 Silero VAD | `threshold` 0.5 → 0.6（[service/app.py:246](../../../service/app.py)） |
 | `language` | 保持 `auto` |
 
 验证方式：同一段真实录音改前/改后 A/B 对照；滤镜与阈值**分开**验证，哪个变差回滚哪个。此改动对口水词无效（预期如此），目标是减少纯环境噪声段。
