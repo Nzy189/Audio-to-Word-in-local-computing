@@ -277,7 +277,8 @@ def transcribe(job, recognizer, clock_started=None):
         command = [
             "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
             "-protocol_whitelist", "file,pipe", "-i", str(source), "-vn", "-t", str(MAX_SECONDS + 1),
-            "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(target),
+            "-ac", "1", "-ar", "16000", "-af", "highpass=f=80,lowpass=f=7500",
+            "-c:a", "pcm_s16le", str(target),
         ]
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         conversion_started = time.monotonic()
@@ -308,7 +309,7 @@ def transcribe(job, recognizer, clock_started=None):
             update(job_id, status="processing", duration=round(duration, 2), progress=3)
             config = sherpa_onnx.VadModelConfig()
             config.silero_vad.model = str(MODELS / "silero_vad.onnx")
-            config.silero_vad.threshold = 0.5
+            config.silero_vad.threshold = 0.6
             config.silero_vad.min_silence_duration = 0.5
             config.silero_vad.min_speech_duration = 0.2
             config.silero_vad.max_speech_duration = 25
@@ -524,7 +525,7 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"ready": ready, "failed": engine_failed, "version": "1.4.0"}
+    return {"ready": ready, "failed": engine_failed, "version": "1.5.0"}
 
 
 @app.get("/api/worker-config")

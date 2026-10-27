@@ -119,7 +119,7 @@ def initialize():
         engine = AutoModel(
             model=os.getenv("FUNASR_MODEL", str(model) if model.exists() else "iic/SenseVoiceSmall"),
             vad_model=os.getenv("VAD_MODEL", str(vad) if vad.exists() else "fsmn-vad"),
-            vad_kwargs={"max_single_segment_time": 30000}, device="cuda:0",
+            vad_kwargs={"max_single_segment_time": 30000, "speech_noise_thres": 0.75}, device="cuda:0",
             disable_update=True, disable_pbar=True, disable_log=True,
         )
         if next(engine.model.parameters()).device.type != "cuda":
@@ -171,7 +171,9 @@ def process(job_id):
         command = [
             ffmpeg_path(), "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
             "-protocol_whitelist", "file,pipe", "-i", str(DATA / (job_id + ".upload")),
-            "-vn", "-t", str(MAX_SECONDS + 1), "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(converted),
+            "-vn", "-t", str(MAX_SECONDS + 1), "-ac", "1", "-ar", "16000",
+            "-af", "highpass=f=80,lowpass=f=7500",
+            "-c:a", "pcm_s16le", str(converted),
         ]
         converted_process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
