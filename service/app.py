@@ -201,8 +201,11 @@ def run_refine(job_id):
             raise llm_refine.RefineError("没有可提炼的转写文字")
         task_event(job_id, "提炼", "AI 提炼开始：模型 %s，转写 %d 字" % (config["model"], len(row["text"])))
 
-        def progress(chars, thinking, elapsed):
-            log.info("AI 提炼进行中 | 任务ID=%s | 已接收 %d 字，思考 %d 字 | 耗时 %.0f 秒", job_id, chars, thinking, elapsed)
+        def progress(chars, thinking, elapsed, eta):
+            if eta is None:
+                log.info("AI 提炼进行中 | 任务ID=%s | 思考中，已 %d 字 | 耗时 %.0f 秒", job_id, thinking, elapsed)
+            else:
+                log.info("AI 提炼进行中 | 任务ID=%s | 已接收 %d 字，思考 %d 字 | 预计还需约 %.0f 秒 | 耗时 %.0f 秒", job_id, chars, thinking, eta, elapsed)
 
         result = llm_refine.refine(row["text"], config["base_url"], config["model"], config["api_key"], progress=progress)
         update(job_id, refine_status="done", refined_text=result["corrected"], summary=result["summary"], refine_error="", refine_at=time.time())
@@ -531,7 +534,7 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"ready": ready, "failed": engine_failed, "version": "1.5.7"}
+    return {"ready": ready, "failed": engine_failed, "version": "1.5.8"}
 
 
 @app.get("/api/worker-config")

@@ -175,12 +175,13 @@ def main():
     def progress_reports():
         reports = []
         r = llm_refine.refine("原文", base, "stub-drip", "sk-test", timeout=10,
-                              progress=lambda chars, thinking, elapsed: reports.append((chars, thinking, elapsed)),
+                              progress=lambda chars, thinking, elapsed, eta: reports.append((chars, thinking, elapsed, eta)),
                               progress_interval=0.1)
         assert r["corrected"] == "干净原文", r
         assert len(reports) >= 2, reports
         assert all(reports[i][0] <= reports[i + 1][0] for i in range(len(reports) - 1)), reports
         assert any(rep[1] > 0 for rep in reports), reports
+        assert any(rep[3] is not None for rep in reports), reports
 
     check("正常返回", ok_result)
     check("代码围栏解析", fence_result)

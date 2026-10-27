@@ -81,7 +81,9 @@ def _request(base_url, model, api_key, user_content, timeout, progress=None, pro
         # 流式读取：超时作用于相邻数据块之间，模型持续输出就不会中断
         content_parts = []
         reasoning_chars = 0
+        expected_total = int(len(user_content) * 1.1) + 100
         stream_started = time.monotonic()
+        output_started = None
         last_report = stream_started
         while True:
             line = response.readline()
@@ -105,13 +107,20 @@ def _request(base_url, model, api_key, user_content, timeout, progress=None, pro
                 delta = choices[0].get("delta") or {}
                 piece = delta.get("content")
                 if piece:
+                    if output_started is None:
+                        output_started = time.monotonic()
                     content_parts.append(piece)
                 think = delta.get("reasoning_content")
                 if think:
                     reasoning_chars += len(think)
             if progress is not None and time.monotonic() - last_report >= progress_interval:
                 last_report = time.monotonic()
-                progress(sum(len(part) for part in content_parts), reasoning_chars, last_report - stream_started)
+                chars = sum(len(part) for part in content_parts)
+                eta = None
+                if output_started is not None and chars > 0:
+                    rate = chars / max(0.001, last_report - output_started)
+                    eta = max(0, expected_total - chars) / rate
+                progress(chars, reasoning_chars, last_report - stream_started, eta)
         return "".join(content_parts)
     except (http.client.HTTPException, OSError) as exc:
         raise _Retryable("无法连接 AI 服务：" + str(exc)[:120])
