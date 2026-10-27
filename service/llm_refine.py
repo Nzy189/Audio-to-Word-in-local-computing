@@ -13,7 +13,8 @@ PROMPT = (
     "- 保留原文的段落结构\n"
     '"summary"：内容概要。\n'
     "- 用精简的要点列表（bullet points）呈现，每点一行\n"
-    "- 只保留核心信息：做了什么、决定了什么、关键数据\n"
+    "- 每点必须是具体信息：做了什么、决定了什么、数字、时间、名字、待办事项\n"
+    '- 禁止泛泛描述（如"讨论了某话题""表达了某种想法"），没有实际信息的内容不要写\n'
     "- 不写引言和套话，不复述原文\n"
     '只输出 JSON，格式：{"corrected": "...", "summary": "..."}，不要输出任何其他内容。'
 )
@@ -58,7 +59,6 @@ def _request(base_url, model, api_key, user_content, timeout):
             {"role": "system", "content": PROMPT},
             {"role": "user", "content": user_content},
         ],
-        "temperature": 0.2,
         "stream": False,
     }).encode()
     headers = {"Content-Type": "application/json", "Authorization": "Bearer " + api_key}
@@ -71,12 +71,14 @@ def _request(base_url, model, api_key, user_content, timeout):
         raise _Retryable("无法连接 AI 服务：" + str(exc)[:120])
     finally:
         connection.close()
-    if status in (401, 403):
-        raise RefineError("API Key 无效或没有权限（HTTP " + str(status) + "）")
-    if status == 404:
-        raise RefineError("API 地址或模型不存在（HTTP 404）")
     if status != 200:
-        raise _Retryable("AI 服务返回 HTTP " + str(status))
+        detail = raw[:200].replace("\n", " ").strip()
+        suffix = "：" + detail if detail else ""
+        if status in (401, 403):
+            raise RefineError("API Key 无效或没有权限（HTTP " + str(status) + "）" + suffix)
+        if status == 404:
+            raise RefineError("API 地址或模型不存在（HTTP 404）" + suffix)
+        raise _Retryable("AI 服务返回 HTTP " + str(status) + suffix)
     return raw
 
 

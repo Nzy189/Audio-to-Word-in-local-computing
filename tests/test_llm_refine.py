@@ -18,9 +18,14 @@ class Stub(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         Stub.calls.append(body.get("model", ""))
+        if "temperature" in body:
+            self._send(400, json.dumps({"error": {"code": "invalid_parameter_error", "message": "Parameter 'temperature' is not supported for this model."}}))
+            return
         model = body.get("model", "")
         if model == "stub-garbage":
             self._send(200, "这不是 JSON")
+        elif model == "stub-400":
+            self._send(400, json.dumps({"error": {"message": "参数无效：演示用的错误详情"}}, ensure_ascii=False))
         elif model == "stub-500":
             self._send(500, "server error")
         elif model == "stub-401":
@@ -113,6 +118,11 @@ def main():
         expect_error(lambda: llm_refine.refine("原文", base, "stub-nonobject", "sk-test", timeout=5), "解析")
         assert len(Stub.calls) == 2, Stub.calls
 
+    def error_body_shown():
+        Stub.calls = []
+        expect_error(lambda: llm_refine.refine("原文", base, "stub-400", "sk-test", timeout=5), "演示用的错误详情")
+        assert len(Stub.calls) == 2, Stub.calls
+
     check("正常返回", ok_result)
     check("代码围栏解析", fence_result)
     check("前缀文本解析", prefix_result)
@@ -122,11 +132,12 @@ def main():
     check("超时失败", timeout_fails)
     check("缺配置报错", missing_config)
     check("非对象JSON重试后失败", non_object_fails_after_retry)
+    check("错误详情透出", error_body_shown)
     server.shutdown()
     if failures:
         print("FAILED:", failures)
         sys.exit(1)
-    print("ALL 9 PASS")
+    print("ALL 10 PASS")
 
 
 if __name__ == "__main__":
