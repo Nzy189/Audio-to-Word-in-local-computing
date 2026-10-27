@@ -22,6 +22,7 @@ const assert = require('node:assert/strict');
   for(const sel of ['#llmUrl','#llmModel','#llmKey','#saveLlm','#testLlm'])assert.equal(await page.locator(sel).isVisible(),true,sel);
   ok('1 AI refine card visible with switch, address, model, key inputs and test-connection button');
   // 2. fill stub config via UI, save, then test connection updates the status text
+  await page.locator('#llmEnabled').check();
   await page.locator('#llmUrl').fill('http://127.0.0.1:18789/v1');
   await page.locator('#llmModel').fill('stub-ok');
   await page.locator('#llmKey').fill('sk-qa123');
@@ -78,13 +79,13 @@ const assert = require('node:assert/strict');
   await page.screenshot({path:'test-results/refine-browser.png',fullPage:true});
   ok('8 tabs and cards lay out normally on mobile');
   // 9. job transcribed with AI disabled shows no tabs; enabling shows 生成 AI 内容; click generates
-  await page.locator('#llmEnabled').click();
+  await page.locator('#llmEnabled').uncheck();
   await page.waitForFunction(()=>document.querySelector('#toast').textContent.includes('已保存'),null,{timeout:10000});
   await page.locator('#file').setInputFiles({name:'网页提炼检查2.wav',mimeType:'audio/wav',buffer:fs.readFileSync('test-results/zh.wav')});
-  await page.waitForFunction(()=>document.querySelector('#resultName').textContent.includes('已完成'),null,{timeout:120000});
+  await page.waitForFunction(()=>{const t=document.querySelector('#resultName').textContent;return t.includes('网页提炼检查2')&&t.includes('已完成')},null,{timeout:120000});
   const id2=await page.locator('.job.active').getAttribute('data-job-id');created.push(id2);
   assert.equal(await page.locator('#refineTabs').isHidden(),true);
-  await page.locator('#llmEnabled').click();
+  await page.locator('#llmEnabled').check();
   await page.waitForFunction(()=>!document.querySelector('#refineTabs').classList.contains('hidden'),null,{timeout:15000});
   assert.equal(await page.locator('#retryRefine').isVisible(),true);
   assert.equal(await page.locator('#retryRefine').textContent(),'生成 AI 内容');
