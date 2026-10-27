@@ -8,8 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "service"))
 import llm_refine
 
-OK = json.dumps({"choices": [{"message": {"content": json.dumps(
-    {"corrected": "干净原文", "summary": "- 要点"}, ensure_ascii=False)}}]}, ensure_ascii=False)
+OK_CONTENT = json.dumps({"corrected": "干净原文", "summary": "- 要点"}, ensure_ascii=False)
 
 
 class Stub(http.server.BaseHTTPRequestHandler):
@@ -21,9 +20,14 @@ class Stub(http.server.BaseHTTPRequestHandler):
         if "temperature" in body:
             self._send(400, json.dumps({"error": {"code": "invalid_parameter_error", "message": "Parameter 'temperature' is not supported for this model."}}))
             return
+        if body.get("stream") is not True:
+            self._send(400, json.dumps({"error": {"message": "客户端必须使用流式请求"}}))
+            return
         model = body.get("model", "")
         if model == "stub-garbage":
-            self._send(200, "这不是 JSON")
+            self._stream("这不是 JSON")
+        elif model == "stub-stream-error":
+            self._stream_error()
         elif model == "stub-400":
             self._send(400, json.dumps({"error": {"message": "参数无效：演示用的错误详情"}}, ensure_ascii=False))
         elif model == "stub-500":
@@ -32,17 +36,39 @@ class Stub(http.server.BaseHTTPRequestHandler):
             self._send(401, json.dumps({"error": {"message": "bad key"}}))
         elif model == "stub-slow":
             time.sleep(6)
-            self._send(200, OK)
+            self._stream(OK_CONTENT)
         elif model == "stub-fence":
-            self._send(200, json.dumps({"choices": [{"message": {"content": "```json\n" + json.dumps(
-                {"corrected": "围栏原文", "summary": "- 围栏要点"}, ensure_ascii=False) + "\n```"}}]}))
+            self._stream("```json\n" + json.dumps(
+                {"corrected": "围栏原文", "summary": "- 围栏要点"}, ensure_ascii=False) + "\n```")
         elif model == "stub-prefix":
-            self._send(200, json.dumps({"choices": [{"message": {"content": "结果如下：" + json.dumps(
-                {"corrected": "前缀原文", "summary": "- 前缀要点"}, ensure_ascii=False)}}]}))
+            self._stream("结果如下：" + json.dumps(
+                {"corrected": "前缀原文", "summary": "- 前缀要点"}, ensure_ascii=False))
         elif model == "stub-nonobject":
-            self._send(200, json.dumps({"choices": [{"message": {"content": "\"只是一个字符串\""}}]}))
+            self._stream('"只是一个字符串"')
         else:
-            self._send(200, OK)
+            self._stream(OK_CONTENT)
+
+    def _stream(self, content):
+        n = max(1, len(content) // 3)
+        pieces = [content[i:i + n] for i in range(0, len(content), n)] or [""]
+        body = b""
+        for piece in pieces:
+            body += b": keep-alive\n\n"
+            body += b"data: " + json.dumps({"choices": [{"delta": {"content": piece}}]}, ensure_ascii=False).encode() + b"\n\n"
+        body += b"data: [DONE]\n\n"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _stream_error(self):
+        body = b"data: " + json.dumps({"error": {"message": "流式中途出错：演示用的流内错误"}}, ensure_ascii=False).encode() + b"\n\n"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _send(self, status, text):
         data = text.encode()
@@ -123,6 +149,11 @@ def main():
         expect_error(lambda: llm_refine.refine("原文", base, "stub-400", "sk-test", timeout=5), "演示用的错误详情")
         assert len(Stub.calls) == 2, Stub.calls
 
+    def stream_error_shown():
+        Stub.calls = []
+        expect_error(lambda: llm_refine.refine("原文", base, "stub-stream-error", "sk-test", timeout=5), "流内错误")
+        assert len(Stub.calls) == 2, Stub.calls
+
     check("正常返回", ok_result)
     check("代码围栏解析", fence_result)
     check("前缀文本解析", prefix_result)
@@ -133,11 +164,12 @@ def main():
     check("缺配置报错", missing_config)
     check("非对象JSON重试后失败", non_object_fails_after_retry)
     check("错误详情透出", error_body_shown)
+    check("流内错误透出", stream_error_shown)
     server.shutdown()
     if failures:
         print("FAILED:", failures)
         sys.exit(1)
-    print("ALL 10 PASS")
+    print("ALL 11 PASS")
 
 
 if __name__ == "__main__":

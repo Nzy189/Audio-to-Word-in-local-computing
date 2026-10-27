@@ -59,27 +59,51 @@ def _request(base_url, model, api_key, user_content, timeout):
             {"role": "system", "content": PROMPT},
             {"role": "user", "content": user_content},
         ],
-        "stream": False,
+        "stream": True,
     }).encode()
-    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + api_key}
+    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + api_key, "Accept": "text/event-stream"}
     try:
         connection.request("POST", path, body=body, headers=headers)
         response = connection.getresponse()
         status = response.status
-        raw = response.read().decode("utf-8", "replace")
+        if status != 200:
+            raw = response.read().decode("utf-8", "replace")
+            detail = raw[:200].replace("\n", " ").strip()
+            suffix = "：" + detail if detail else ""
+            if status in (401, 403):
+                raise RefineError("API Key 无效或没有权限（HTTP " + str(status) + "）" + suffix)
+            if status == 404:
+                raise RefineError("API 地址或模型不存在（HTTP 404）" + suffix)
+            raise _Retryable("AI 服务返回 HTTP " + str(status) + suffix)
+        # 流式读取：超时作用于相邻数据块之间，模型持续输出就不会中断
+        content_parts = []
+        while True:
+            line = response.readline()
+            if not line:
+                break
+            text_line = line.decode("utf-8", "replace").strip()
+            if not text_line or text_line.startswith(":") or not text_line.startswith("data:"):
+                continue
+            payload = text_line[5:].strip()
+            if payload == "[DONE]":
+                break
+            try:
+                chunk = json.loads(payload)
+            except ValueError:
+                continue
+            if isinstance(chunk, dict) and chunk.get("error"):
+                message = chunk["error"].get("message") if isinstance(chunk["error"], dict) else chunk["error"]
+                raise _Retryable("AI 服务流式返回错误：" + str(message)[:200])
+            choices = chunk.get("choices") or []
+            if choices:
+                piece = (choices[0].get("delta") or {}).get("content")
+                if piece:
+                    content_parts.append(piece)
+        return "".join(content_parts)
     except (http.client.HTTPException, OSError) as exc:
         raise _Retryable("无法连接 AI 服务：" + str(exc)[:120])
     finally:
         connection.close()
-    if status != 200:
-        detail = raw[:200].replace("\n", " ").strip()
-        suffix = "：" + detail if detail else ""
-        if status in (401, 403):
-            raise RefineError("API Key 无效或没有权限（HTTP " + str(status) + "）" + suffix)
-        if status == 404:
-            raise RefineError("API 地址或模型不存在（HTTP 404）" + suffix)
-        raise _Retryable("AI 服务返回 HTTP " + str(status) + suffix)
-    return raw
 
 
 def refine(raw_text, base_url, model, api_key, timeout=120):
@@ -91,9 +115,7 @@ def refine(raw_text, base_url, model, api_key, timeout=120):
     last_error = None
     for attempt in (1, 2):
         try:
-            raw = _request(base_url, model, api_key, user_content, timeout)
-            payload = json.loads(raw)
-            content = payload["choices"][0]["message"]["content"]
+            content = _request(base_url, model, api_key, user_content, timeout)
             result = _parse_content(content)
             corrected = str(result.get("corrected") or "").strip()
             summary = str(result.get("summary") or "").strip()
@@ -104,7 +126,7 @@ def refine(raw_text, base_url, model, api_key, timeout=120):
             last_error = str(exc)
         except RefineError:
             raise
-        except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
+        except (ValueError, TypeError, AttributeError) as exc:
             last_error = "AI 返回格式无法解析：" + str(exc)[:120]
             if attempt == 1:
                 user_content = raw_text + "\n\n（请务必只输出 JSON 对象，不要包含任何其他文字。）"
