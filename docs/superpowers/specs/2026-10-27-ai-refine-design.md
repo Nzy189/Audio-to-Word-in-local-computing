@@ -31,7 +31,7 @@
 
 JSON 结构：`{"enabled": bool, "base_url": str, "model": str, "api_key": str}`
 
-- 默认值：`base_url = https://dashscope.aliyuncs.com/compatible-mode/v1`（阿里百炼 OpenAI 兼容端点），`model = qwen-plus`。换 DeepSeek 等其他平台只需改地址和模型名。
+- 默认值（用户已确认）：`base_url = https://llm-4qs0qwijnzh269f3.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`（百炼新加坡区域用户专属 OpenAI 兼容端点，2026-10-27 实测存活），`model = kimi-k3`。换 DeepSeek 等其他平台只需改地址和模型名。
 - `api_key` 只存 NAS SQLite（`/data/jobs.sqlite3`），不进代码、日志、PROJECT_STATUS 和发布包。网页有口令保护，单人内网使用，可接受。
 - 配置读写走与 `remote_worker` 相同的 settings 模式。
 
@@ -53,7 +53,7 @@ JSON 结构：`{"enabled": bool, "base_url": str, "model": str, "api_key": str}`
 - 请求：OpenAI 兼容 `POST {base_url}/chat/completions`，`Authorization: Bearer {api_key}`，`messages` = [system 提示词, user 原始转写]，`temperature` 低值（0.2）。
 - 超时 120 秒；网络/超时/5xx 重试 1 次；JSON 解析失败时追加"只输出 JSON"的更强指令重试 1 次；仍失败则 `refine_status=failed`。
 - 解析容错：剥离 ```json 代码围栏后再 `json.loads`。
-- 长文本：3 小时录音约 5~10 万字，qwen-plus / deepseek-chat 的 128K 上下文可容纳，不做分段合并。
+- 长文本：3 小时录音约 5~10 万字，主流模型上下文可容纳，不做分段合并；API 返回超限错误时按提炼失败处理并显示原因。
 - 提炼在转写完成后于同一处理线程顺序执行（NAS 本就逐条处理任务），不引入并发。
 
 ### 提示词（system，实现以此为准）
@@ -104,7 +104,7 @@ JSON 结构：`{"enabled": bool, "base_url": str, "model": str, "api_key": str}`
 | --- | --- |
 | `worker/server.py` FFmpeg 命令 | 加 `-af "highpass=f=80,lowpass=f=7500"` |
 | `service/app.py` 本机 FFmpeg 转换 | 同上 |
-| GPU 侧 FSMN VAD（`vad_kwargs`） | 噪声判定阈值调严一档（参数名与取值实现时对照 FunASR 文档/源码验证，从默认约 0.5 提至约 0.65） |
+| GPU 侧 FSMN VAD（`vad_kwargs`） | `speech_noise_thres` 从默认 0.6 提至 0.75（2026-10-27 已对照本机 FunASR 1.4.16 源码确认：参数在 `fsmn_vad_streaming/model.py:100`，经 `vad_kwargs` 传入） |
 | NAS 侧 Silero VAD | `threshold` 0.5 → 0.6（[service/app.py:246](../../../service/app.py)） |
 | `language` | 保持 `auto` |
 
@@ -130,5 +130,5 @@ JSON 结构：`{"enabled": bool, "base_url": str, "model": str, "api_key": str}`
 
 - LLM 可能偶尔改写原意 → 原始转写永远保留并置于首位，AI 内容明确标注。
 - NAS 容器外网出口未验证 → 实现第一步验证，不通则给用户明确的排查指引。
-- 百炼/DeepSeek 需用户自行注册充值获取 key → 用户操作，key 不经手开发过程。
-- VAD 参数名需对照 FunASR 实际源码确认，不凭记忆写参数。
+- 用户已提供百炼新加坡端点与模型名（kimi-k3）；API key 由用户在网页设置中自行填写，不经手开发过程。模型与 key 的实际可用性由"测试连接"在配置时验证。
+- VAD 参数已对照本机 FunASR 1.4.16 源码确认：`speech_noise_thres`，默认 0.6，经 `vad_kwargs` 传入；调优取值 0.75 需 A/B 实测，变差即回滚。
