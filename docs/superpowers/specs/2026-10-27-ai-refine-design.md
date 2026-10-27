@@ -15,7 +15,7 @@
 
 ```
 转写 done（原始文字已保存，现有状态机不变）
-→ 读 settings 表 llm_refine 配置；未启用或未配置 → 无提炼，行为同 1.4
+→ 读 LLM 配置（网页设置优先，其次 nas.env 环境变量）；未启用或未配置 → 无提炼，行为同 1.4
 → 已启用 → 后台执行提炼（不阻塞转写结果展示）
 → POST {base_url}/chat/completions（OpenAI 兼容格式）
 → 一次调用返回 {"corrected": 优化原文, "summary": 概要}
@@ -27,13 +27,22 @@
 
 ## 3. 配置与数据模型
 
-### settings 表新增键 `llm_refine`
+### 配置来源：nas.env 环境变量 + 网页设置（与"电脑加速"同模式）
 
-JSON 结构：`{"enabled": bool, "base_url": str, "model": str, "api_key": str}`
+优先级：**网页设置（SQLite `settings` 表 `llm_refine` 键）> nas.env 环境变量 > 代码内置默认**。网页保存后无需重启容器即生效；从未做过网页保存时使用 env/默认值（2026-10-27 用户确认采用此双通道）。
 
-- 默认值（用户已确认）：`base_url = https://llm-4qs0qwijnzh269f3.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`（百炼新加坡区域用户专属 OpenAI 兼容端点，2026-10-27 实测存活），`model = kimi-k3`。换 DeepSeek 等其他平台只需改地址和模型名。
-- `api_key` 只存 NAS SQLite（`/data/jobs.sqlite3`），不进代码、日志、PROJECT_STATUS 和发布包。网页有口令保护，单人内网使用，可接受。
-- 配置读写走与 `remote_worker` 相同的 settings 模式。
+环境变量（写入 nas.env，随容器启动加载）：
+
+| 变量 | 必填 | 默认 |
+| --- | --- | --- |
+| `LLM_API_KEY` | 启用提炼必填 | 空（未配置则不提炼） |
+| `LLM_BASE_URL` | 可选 | `https://llm-4qs0qwijnzh269f3.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`（用户专属端点，2026-10-27 实测存活） |
+| `LLM_MODEL` | 可选 | `kimi-k3` |
+| `LLM_ENABLED` | 可选 | `true`；有效启用 = 开关为真且 Key 非空 |
+
+- 网页设置卡片（与"电脑加速"同款）可随时覆盖：开关、API 地址、模型名、API Key、测试连接；保存为 SQLite `settings` 表 `llm_refine` 键（JSON：`{"enabled", "base_url", "model", "api_key"}`）。
+- `api_key` 只存 NAS SQLite 与 nas.env，不进代码、日志、PROJECT_STATUS 和发布包；`GET /api/llm-config` 只返回脱敏掩码（如 `sk-***`）。网页保存时空 Key 字段表示保留现有 Key；空地址/模型字段同样保留现有值。
+- 配置读写走与 `remote_worker` 完全相同的 settings 模式（含 `source` 字段区分"网页设置/默认配置"）。
 
 ### jobs 表新增列（启动时自动迁移，兼容旧库与旧记录）
 
@@ -83,7 +92,7 @@ JSON 结构：`{"enabled": bool, "base_url": str, "model": str, "api_key": str}`
 
 | 接口 | 作用 |
 | --- | --- |
-| `GET /api/llm-config` | 返回配置（api_key 脱敏显示，如 `sk-***`） |
+| `GET /api/llm-config` | 返回配置（api_key 脱敏显示，如 `sk-***`；含 `source` 字段区分网页设置/默认配置） |
 | `POST /api/llm-config` | 保存配置 |
 | `POST /api/llm-config/test` | 发一条最小请求验证地址/key/模型可用 |
 | `POST /api/jobs/{job_id}/refine` | 对已完成任务手动重新提炼 |
@@ -130,5 +139,5 @@ JSON 结构：`{"enabled": bool, "base_url": str, "model": str, "api_key": str}`
 
 - LLM 可能偶尔改写原意 → 原始转写永远保留并置于首位，AI 内容明确标注。
 - NAS 容器外网出口未验证 → 实现第一步验证，不通则给用户明确的排查指引。
-- 用户已提供百炼新加坡端点与模型名（kimi-k3）；API key 由用户在网页设置中自行填写，不经手开发过程。模型与 key 的实际可用性由"测试连接"在配置时验证。
+- 用户已提供百炼新加坡端点与模型名（kimi-k3）；API key 由用户写入 nas.env 或网页设置，两处都只在 NAS 本机，不入代码与文档。模型与 key 的实际可用性由"测试连接"在配置时验证。
 - VAD 参数已对照本机 FunASR 1.4.16 源码确认：`speech_noise_thres`，默认 0.6，经 `vad_kwargs` 传入；调优取值 0.75 需 A/B 实测，变差即回滚。
