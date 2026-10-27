@@ -129,8 +129,9 @@ F:\Codex Project\atow\dist\shengjian-1.5\BUILD-INFO.json
 F:\Codex Project\atow\dist\shengjian-1.5\SHA256SUMS.txt
 ```
 
-- ZIP：274,942,668 字节，约 262.2 MiB；SHA-256 `5654218f290ebe2cd08b708e4dac9114e68fd0c41add369e01d2d22da5ba6f7e`。
-- 镜像 tar：275,776,000 字节，SHA-256 `f4fecbf58e074582cf19acd0d725e009cfad976483e80078c60aa20bffd08b8f`。
+- ZIP：274,942,890 字节，约 262.2 MiB；SHA-256 `a5714859002fbd5fce851d1097119fac2ae6ab135a3a749222bcfc7f107c86b1`。
+- 镜像 tar：275,776,000 字节，SHA-256 `517f5e93c0e5ff99221722d235942b019958132e84faeb6d442039f932a13a51`。
+- 以上为评审修复波（提交 `c7a5282`：AI 页签下载按钮随提炼状态禁用、登出重置设置加载标志）后的重打包产物，包内镜像已含该修复。
 - Docker 镜像标签：`shengjian:1.5.0-arm64`；`docker load -i` 核验输出 `Loaded image: shengjian:1.5.0-arm64`，`docker image inspect` 确认架构 arm64。
 - ZIP 解压核验：14/14 个文件与源目录一致，解压后 tar 的 SHA-256 与源一致。
 - 镜像内包含模型、VAD、FFmpeg；不内置用户网页口令，也**不含任何 API Key**；包内无 `computer-connection.json`（免密钥后无需导入任何配置）。`nas.env` 含网页口令并附注释掉的 `LLM_*` 模板行（默认端点与 kimi-k3，Key 留空），不要公开分享整个个人安装包。
@@ -272,6 +273,7 @@ queued → remote_upload → remote_processing → done
   - 期间发现并修复网页首屏未登录 401 探测与 favicon 404 控制台报错（提交 `d67ff66`），修复后重建镜像并从 Phase A 起全量重跑，以上证据均出自修复后镜像。
   - 打包核验：`docker load -i` 输出 `Loaded image: shengjian:1.5.0-arm64`、镜像架构 arm64、ZIP 解压 14/14 文件且解压后 tar 哈希与源一致、包内文本无任何 API Key 且无 `computer-connection.json`。
   - QA 容器 `atow-logs-qa` 与临时卷已清理；**电脑 GPU 服务未重启，仍运行 1.4 代码**。
+  - 评审修复波（同日，提交 `c7a5282`）：AI 页签"下载 TXT"随提炼状态禁用（提炼 running/failed 时禁用，避免跳到 409 JSON 页；原文页签对已完成任务保持可用）、登出重置 `llmLoaded` 设置加载标志。修复后重建镜像、重打包并重跑浏览器回归：`browser-refine-check.cjs` 9 项 PASS；另按 API 把模型切到 `stub-garbage` 触发提炼失败后刷新详情页，断言 AI 页签下载按钮禁用、切回原文页签恢复可用（4 项断言全过）。发布物校验值更新为修复后产物（见第 5 节），包内镜像 grep 确认含两处修复；QA 容器与临时卷清理零残留，电脑 GPU 服务仍未重启。
 
 一次取消测试观察到 CPU 清理约 0.7 秒、真实 GPU 清理约 1.5 秒，仅是该测试结果，不是所有设备的响应保证。
 
