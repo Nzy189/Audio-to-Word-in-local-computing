@@ -199,6 +199,7 @@ def run_refine(job_id):
             row = conn.execute("SELECT text FROM jobs WHERE id=?", (job_id,)).fetchone()
         if row is None or not row["text"]:
             raise llm_refine.RefineError("没有可提炼的转写文字")
+        task_event(job_id, "提炼", "AI 提炼开始：模型 %s，转写 %d 字" % (config["model"], len(row["text"])))
         result = llm_refine.refine(row["text"], config["base_url"], config["model"], config["api_key"])
         update(job_id, refine_status="done", refined_text=result["corrected"], summary=result["summary"], refine_error="", refine_at=time.time())
         task_event(job_id, "提炼", "AI 提炼完成，耗时 %.1f 秒" % (time.time() - started))
@@ -525,7 +526,7 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"ready": ready, "failed": engine_failed, "version": "1.5.3"}
+    return {"ready": ready, "failed": engine_failed, "version": "1.5.4"}
 
 
 @app.get("/api/worker-config")
