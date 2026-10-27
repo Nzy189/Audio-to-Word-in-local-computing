@@ -34,6 +34,8 @@ class Stub(http.server.BaseHTTPRequestHandler):
         elif model == "stub-prefix":
             self._send(200, json.dumps({"choices": [{"message": {"content": "结果如下：" + json.dumps(
                 {"corrected": "前缀原文", "summary": "- 前缀要点"}, ensure_ascii=False)}}]}))
+        elif model == "stub-nonobject":
+            self._send(200, json.dumps({"choices": [{"message": {"content": "\"只是一个字符串\""}}]}))
         else:
             self._send(200, OK)
 
@@ -106,6 +108,11 @@ def main():
         expect_error(lambda: llm_refine.refine("原文", "", "m", "k"), "配置")
         expect_error(lambda: llm_refine.refine("", base, "m", "k"), "文字")
 
+    def non_object_fails_after_retry():
+        Stub.calls = []
+        expect_error(lambda: llm_refine.refine("原文", base, "stub-nonobject", "sk-test", timeout=5), "解析")
+        assert len(Stub.calls) == 2, Stub.calls
+
     check("正常返回", ok_result)
     check("代码围栏解析", fence_result)
     check("前缀文本解析", prefix_result)
@@ -114,11 +121,12 @@ def main():
     check("401不重试", unauthorized_no_retry)
     check("超时失败", timeout_fails)
     check("缺配置报错", missing_config)
+    check("非对象JSON重试后失败", non_object_fails_after_retry)
     server.shutdown()
     if failures:
         print("FAILED:", failures)
         sys.exit(1)
-    print("ALL 8 PASS")
+    print("ALL 9 PASS")
 
 
 if __name__ == "__main__":

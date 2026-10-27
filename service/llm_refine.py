@@ -102,7 +102,7 @@ def refine(raw_text, base_url, model, api_key, timeout=120):
             last_error = str(exc)
         except RefineError:
             raise
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
+        except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
             last_error = "AI 返回格式无法解析：" + str(exc)[:120]
             if attempt == 1:
                 user_content = raw_text + "\n\n（请务必只输出 JSON 对象，不要包含任何其他文字。）"
