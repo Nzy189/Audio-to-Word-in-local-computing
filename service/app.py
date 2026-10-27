@@ -482,6 +482,7 @@ async def lifespan(app):
         conn.execute("CREATE TABLE IF NOT EXISTS job_events (id INTEGER PRIMARY KEY AUTOINCREMENT,job_id TEXT NOT NULL,created REAL NOT NULL,event TEXT NOT NULL,message TEXT NOT NULL)")
         conn.execute("CREATE INDEX IF NOT EXISTS job_events_job_id ON job_events(job_id,id)")
         conn.execute("UPDATE jobs SET status='queued', progress=0, text='', started=NULL, elapsed=NULL WHERE status IN ('converting','processing','remote_upload','remote_processing')")
+        conn.execute("UPDATE jobs SET refine_status='failed', refine_error='服务重启时 AI 提炼中断，请重新提炼' WHERE refine_status='running'")
     threading.Thread(target=worker, daemon=True).start()
     yield
     stop.set()
@@ -526,7 +527,7 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"ready": ready, "failed": engine_failed, "version": "1.5.5"}
+    return {"ready": ready, "failed": engine_failed, "version": "1.5.6"}
 
 
 @app.get("/api/worker-config")
