@@ -1,5 +1,6 @@
 import http.client
 import json
+import time
 from urllib.parse import urlsplit
 
 PROMPT = (
@@ -48,7 +49,7 @@ def _parse_content(content):
         raise
 
 
-def _request(base_url, model, api_key, user_content, timeout):
+def _request(base_url, model, api_key, user_content, timeout, progress=None, progress_interval=30):
     parts = urlsplit(base_url)
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise RefineError("API 地址格式无效")
@@ -79,6 +80,9 @@ def _request(base_url, model, api_key, user_content, timeout):
             raise _Retryable("AI 服务返回 HTTP " + str(status) + suffix)
         # 流式读取：超时作用于相邻数据块之间，模型持续输出就不会中断
         content_parts = []
+        reasoning_chars = 0
+        stream_started = time.monotonic()
+        last_report = stream_started
         while True:
             line = response.readline()
             if not line:
@@ -98,9 +102,16 @@ def _request(base_url, model, api_key, user_content, timeout):
                 raise _Retryable("AI 服务流式返回错误：" + str(message)[:200])
             choices = chunk.get("choices") or []
             if choices:
-                piece = (choices[0].get("delta") or {}).get("content")
+                delta = choices[0].get("delta") or {}
+                piece = delta.get("content")
                 if piece:
                     content_parts.append(piece)
+                think = delta.get("reasoning_content")
+                if think:
+                    reasoning_chars += len(think)
+            if progress is not None and time.monotonic() - last_report >= progress_interval:
+                last_report = time.monotonic()
+                progress(sum(len(part) for part in content_parts), reasoning_chars, last_report - stream_started)
         return "".join(content_parts)
     except (http.client.HTTPException, OSError) as exc:
         raise _Retryable("无法连接 AI 服务：" + str(exc)[:120])
@@ -108,7 +119,7 @@ def _request(base_url, model, api_key, user_content, timeout):
         connection.close()
 
 
-def refine(raw_text, base_url, model, api_key, timeout=120):
+def refine(raw_text, base_url, model, api_key, timeout=120, progress=None, progress_interval=30):
     if not (base_url and model and api_key):
         raise RefineError("AI 提炼未配置完整（需要地址、模型和 API Key）")
     if not raw_text or not raw_text.strip():
@@ -117,7 +128,7 @@ def refine(raw_text, base_url, model, api_key, timeout=120):
     last_error = None
     for attempt in (1, 2):
         try:
-            content = _request(base_url, model, api_key, user_content, timeout)
+            content = _request(base_url, model, api_key, user_content, timeout, progress, progress_interval)
             result = _parse_content(content)
             corrected = str(result.get("corrected") or "").strip()
             summary = str(result.get("summary") or "").strip()

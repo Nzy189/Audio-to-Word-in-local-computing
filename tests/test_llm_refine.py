@@ -45,6 +45,24 @@ class Stub(http.server.BaseHTTPRequestHandler):
                 {"corrected": "前缀原文", "summary": "- 前缀要点"}, ensure_ascii=False))
         elif model == "stub-nonobject":
             self._stream('"只是一个字符串"')
+        elif model == "stub-drip":
+            n = max(1, len(OK_CONTENT) // 10)
+            pieces = [OK_CONTENT[i:i + n] for i in range(0, len(OK_CONTENT), n)]
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            for think in ("思考片段一", "思考片段二", "思考片段三"):
+                data = b"data: " + json.dumps({"choices": [{"delta": {"reasoning_content": think}}]}, ensure_ascii=False).encode() + b"\n\n"
+                self.wfile.write(data)
+                self.wfile.flush()
+                time.sleep(0.05)
+            for piece in pieces:
+                data = b"data: " + json.dumps({"choices": [{"delta": {"content": piece}}]}, ensure_ascii=False).encode() + b"\n\n"
+                self.wfile.write(data)
+                self.wfile.flush()
+                time.sleep(0.05)
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
         else:
             self._stream(OK_CONTENT)
 
@@ -154,6 +172,16 @@ def main():
         expect_error(lambda: llm_refine.refine("原文", base, "stub-stream-error", "sk-test", timeout=5), "流内错误")
         assert len(Stub.calls) == 2, Stub.calls
 
+    def progress_reports():
+        reports = []
+        r = llm_refine.refine("原文", base, "stub-drip", "sk-test", timeout=10,
+                              progress=lambda chars, thinking, elapsed: reports.append((chars, thinking, elapsed)),
+                              progress_interval=0.1)
+        assert r["corrected"] == "干净原文", r
+        assert len(reports) >= 2, reports
+        assert all(reports[i][0] <= reports[i + 1][0] for i in range(len(reports) - 1)), reports
+        assert any(rep[1] > 0 for rep in reports), reports
+
     check("正常返回", ok_result)
     check("代码围栏解析", fence_result)
     check("前缀文本解析", prefix_result)
@@ -165,11 +193,12 @@ def main():
     check("非对象JSON重试后失败", non_object_fails_after_retry)
     check("错误详情透出", error_body_shown)
     check("流内错误透出", stream_error_shown)
+    check("进度回调", progress_reports)
     server.shutdown()
     if failures:
         print("FAILED:", failures)
         sys.exit(1)
-    print("ALL 11 PASS")
+    print("ALL 12 PASS")
 
 
 if __name__ == "__main__":
