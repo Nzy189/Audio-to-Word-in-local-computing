@@ -1,6 +1,6 @@
 services:
   shengjian:
-    image: shengjian:1.5.0-arm64
+    image: shengjian:1.5.1-arm64
     platform: linux/arm64
     container_name: shengjian
     restart: unless-stopped
