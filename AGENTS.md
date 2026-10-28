@@ -1,6 +1,6 @@
 # Project entrypoint
 
-Before working in this repository, read **PROJECT_STATUS.md**. It is the single source of truth for development progress, deployment evidence, verification, and next steps.
+Before working in this repository, read **PROJECT_STATUS.md**. It is the single source of truth for development progress, deployment evidence, verification, and next steps. Reference material (addresses, environment, architecture, release checksums, credential locations, task lifecycle, test entry points, ops runbooks, pitfalls) lives in **docs/REFERENCE.md** — consult the relevant section on demand instead of reading it upfront.
 
 ## Preserve the user's decisions
 
@@ -9,7 +9,7 @@ Before working in this repository, read **PROJECT_STATUS.md**. It is the single 
 - Preserve the original `/data` mount, existing records, and other services. The actual NAS web port is **18088**, container port **8787**.
 - Clean temporary audio on completion, failure, and termination. Do not label work terminated before local cleanup completes.
 - Follow the current 1.4 keyless computer connection workflow: built-in default address, automatic web status checks, and web address editing when needed. Do not require configuration imports, connection keys, or manual URL/token environment-variable setup.
-- Never copy passwords, tokens, session secrets, or real transcript content into progress documentation or logs. Runtime secret locations are in PROJECT_STATUS.md.
+- Never copy passwords, tokens, session secrets, or real transcript content into progress documentation or logs. Runtime secret locations are in docs/REFERENCE.md.
 
 ## Deployment and validation
 
@@ -20,4 +20,4 @@ Before working in this repository, read **PROJECT_STATUS.md**. It is the single 
 
 ## Keep the handoff current
 
-After meaningful work, update PROJECT_STATUS.md with the current state, verification performed, release identity, unresolved limitations, and the next concrete step. Keep README.md as an entrypoint rather than a second competing progress log.
+After meaningful work, update PROJECT_STATUS.md with the current state, verification performed, release identity, unresolved limitations, and the next concrete step. When reference facts change (addresses, runbooks, pitfalls, release checksums), update docs/REFERENCE.md instead. Keep README.md as an entrypoint rather than a second competing progress log.
