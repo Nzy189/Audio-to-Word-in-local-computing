@@ -4,7 +4,7 @@ import subprocess
 import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
-IMAGE = "atow-transcriber:1.6.1-ecs"
+IMAGE = "atow-transcriber:1.6.2-ecs"
 NAME = "atow-ecs-qa-" + uuid.uuid4().hex[:12]
 
 

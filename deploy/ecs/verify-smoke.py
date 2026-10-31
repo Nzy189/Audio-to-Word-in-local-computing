@@ -66,9 +66,9 @@ while time.monotonic() < deadline:
     time.sleep(1)
 else:
     raise AssertionError("QA engine did not become ready")
-assert health["version"] == "1.6.1" and not health["failed"]
+assert health["version"] == "1.6.2" and not health["failed"]
 assert health["local_engine"] == "SenseVoice FP32 / sherpa-onnx CPU"
-print("PASS ECS 1.6.1 health and native FP32 CPU engine ready", flush=True)
+print("PASS ECS 1.6.2 health and native FP32 CPU engine ready", flush=True)
 
 assert request("/api/jobs", auth=False)[0] == 401
 assert request("/", auth=False)[0] == 200

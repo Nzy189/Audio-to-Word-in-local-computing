@@ -54,4 +54,4 @@ Phone uploads an existing recording
 | `deploy/` (rest) | Legacy ECS deployment and ops files |
 | `PROJECT_STATUS.md` | Master status document: progress, verification, addresses, secret locations, next steps |
 
-Current source version: 1.6.1 (adds an access-audit log and a merged start-time field on top of 1.6.0's two-phase AI refinement, per-phase token usage and transcription-hardware display; SenseVoice FP32 CPU recognition). The latest published NAS package remains 1.5.8. Release files live in the local `dist/` folder and are not committed; actual deployment state is tracked in PROJECT_STATUS.md.
+Current source version: 1.6.2 (adds a summary-prompt rule to infer correct spellings of names and terms from context, on top of 1.6.1's access-audit log; includes 1.6.0's two-phase AI refinement, per-phase token usage and transcription-hardware display; SenseVoice FP32 CPU recognition). The latest published NAS package remains 1.5.8. Release files live in the local `dist/` folder and are not committed; actual deployment state is tracked in PROJECT_STATUS.md.

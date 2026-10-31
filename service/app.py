@@ -642,7 +642,7 @@ def index(request: Request):
 
 @app.get("/api/health")
 def health():
-    return {"ready": ready, "failed": engine_failed, "version": "1.6.1", "local_engine": LOCAL_ENGINE}
+    return {"ready": ready, "failed": engine_failed, "version": "1.6.2", "local_engine": LOCAL_ENGINE}
 
 
 @app.get("/api/worker-config")
