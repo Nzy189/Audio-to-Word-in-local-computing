@@ -34,6 +34,7 @@ Phone uploads an existing recording
 - NAS-to-PC connection key checks have been removed; no token or PC configuration import is required. The NAS web app still requires its `ACCESS_CODE` login.
 - Automatic fallback: PC off, asleep, busy, low on VRAM or failing → NAS CPU, with the exact reason in the task log.
 - Job history: audio duration, processing time, submit/start/finish times, actual device and engine; click through to the full text, copy or download as TXT.
+- AI refinement through an OpenAI-compatible API: corrected text, summaries grouped by topic and outstanding tasks; preserves the original transcript and supports regeneration, progress logs and remaining-time estimates.
 - Termination: queued, NAS CPU and PC GPU jobs can all be cancelled; the terminal state only appears after both sides' temp audio is cleaned.
 - Auto-detects Chinese, English, Cantonese, Japanese and Korean; transcripts retained for 7 days.
 
@@ -41,6 +42,7 @@ Phone uploads an existing recording
 
 - **Z2 Pro NAS (ARM64)**: see [deploy/nas/README.md](deploy/nas/README.md) (Chinese). Import the image, keep the existing `/data` mount and access code — no PC configuration file needed.
 - **Windows GPU service**: see [worker/README.md](worker/README.md) (Chinese). Reuses an existing FunASR environment; auto-starts after Windows login.
+- **ECS (x86_64)**: see [deploy/ecs/README.md](deploy/ecs/README.md) (Chinese). Uses a separate amd64 image and the ECS CPU; configure the AI service through the web UI.
 
 ## Layout
 
@@ -52,4 +54,4 @@ Phone uploads an existing recording
 | `deploy/` (rest) | Legacy ECS deployment and ops files |
 | `PROJECT_STATUS.md` | Master status document: progress, verification, addresses, secret locations, next steps |
 
-Current version: 1.4 (keyless PC acceleration). Built release packages live in the local `dist/` folder and are not committed; actual deployment state is tracked in PROJECT_STATUS.md.
+Current source version: 1.6.1 (adds an access-audit log and a merged start-time field on top of 1.6.0's two-phase AI refinement, per-phase token usage and transcription-hardware display; SenseVoice FP32 CPU recognition). The latest published NAS package remains 1.5.8. Release files live in the local `dist/` folder and are not committed; actual deployment state is tracked in PROJECT_STATUS.md.

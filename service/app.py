@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import os
+import platform
 import re
 import secrets
 import sqlite3
@@ -26,7 +27,7 @@ import llm_refine
 
 DATA = Path(os.getenv("DATA_DIR", "/data"))
 MODELS = Path(os.getenv("MODEL_DIR", "/models"))
-MODEL = MODELS / "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+MODEL = MODELS / "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
 ACCESS_CODE = os.environ["ACCESS_CODE"]
 ORIGIN = os.getenv("PUBLIC_ORIGIN", "https://80.238.236.1")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").lower() in ("true", "1", "yes")
@@ -39,8 +40,40 @@ LLM_ENV_MODEL = os.getenv("LLM_MODEL", "").strip()
 LLM_ENV_KEY = os.getenv("LLM_API_KEY", "").strip()
 LLM_ENV_ENABLED = os.getenv("LLM_ENABLED", "true").lower() in ("true", "1", "yes")
 LOCAL_NODE_NAME = os.getenv("LOCAL_NODE_NAME", "本机 CPU")
-LOCAL_ENGINE = "SenseVoice INT8 / sherpa-onnx CPU"
+LOCAL_ENGINE = "SenseVoice FP32 / sherpa-onnx CPU"
 REMOTE_ENGINE = "SenseVoiceSmall / FunASR CUDA"
+
+
+def detect_local_hardware():
+    parts = []
+    cpu_model = ""
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as info:
+            for line in info:
+                if line.startswith("model name"):
+                    cpu_model = line.split(":", 1)[1].strip()
+                    break
+    except OSError:
+        pass
+    if not cpu_model:
+        cpu_model = platform.processor() or ""
+    if cpu_model:
+        parts.append(cpu_model)
+    cores = os.cpu_count()
+    if cores:
+        parts.append("%d 核" % cores)
+    try:
+        with open("/proc/meminfo", encoding="utf-8", errors="replace") as info:
+            for line in info:
+                if line.startswith("MemTotal"):
+                    parts.append("%.0f GB 内存" % (int(line.split()[1]) / 1024 / 1024))
+                    break
+    except (OSError, ValueError, IndexError):
+        pass
+    return " · ".join(parts)
+
+
+LOCAL_HARDWARE = detect_local_hardware()
 MAX_BYTES = 300 * 1024 * 1024
 MAX_SECONDS = 3 * 3600
 RETENTION = 7 * 86400
@@ -141,6 +174,16 @@ def task_event(job_id, event, message):
         log.warning("任务日志暂时无法保存，任务ID=%s", job_id)
 
 
+def audit(event, code="", ip="", detail=""):
+    try:
+        with db() as conn:
+            conn.execute("INSERT INTO audit_log(created,event,code,ip,detail) VALUES (?,?,?,?,?)",
+                         (time.time(), event, str(code)[:256], str(ip)[:64], str(detail)[:200]))
+            conn.execute("DELETE FROM audit_log WHERE id NOT IN (SELECT id FROM audit_log ORDER BY id DESC LIMIT 2000)")
+    except Exception:
+        log.warning("访问审计暂时无法保存：%s", event)
+
+
 def remote_settings():
     with db() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key='remote_worker'").fetchone()
@@ -186,34 +229,84 @@ def llm_settings():
 def claim_refine(job_id):
     with db() as conn:
         claimed = conn.execute(
-            "UPDATE jobs SET refine_status='running' WHERE id=? AND (refine_status IS NULL OR refine_status IN ('none','done','failed'))",
+            "UPDATE jobs SET refine_status='running' WHERE id=? AND (refine_status IS NULL OR refine_status IN ('none','done','failed')) AND (corrected_status IS NULL OR corrected_status!='running')",
             (job_id,))
         return bool(claimed.rowcount)
 
 
-def run_refine(job_id):
+def claim_corrected(job_id):
+    with db() as conn:
+        claimed = conn.execute(
+            "UPDATE jobs SET corrected_status='running', corrected_error='', corrected_progress='' WHERE id=? AND refine_status='done' AND corrected_status IN ('none','failed')",
+            (job_id,))
+        return bool(claimed.rowcount)
+
+
+def _usage_note(usage):
+    note = "tokens 输入 %d / 输出 %d" % (usage["prompt_tokens"], usage["completion_tokens"])
+    return note + "（估算）" if usage.get("estimated") else note
+
+
+def run_summary(job_id, config):
     started = time.time()
+    with db() as conn:
+        row = conn.execute("SELECT text FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if row is None or not row["text"]:
+        raise llm_refine.RefineError("没有可提炼的转写文字")
+    task_event(job_id, "提炼", "AI 纪要生成开始：模型 %s，转写 %d 字" % (config["model"], len(row["text"])))
+
+    def progress(chars, thinking, elapsed, eta):
+        if eta is None:
+            log.info("AI 纪要生成中 | 任务ID=%s | 思考中，已 %d 字 | 耗时 %.0f 秒", job_id, thinking, elapsed)
+        else:
+            log.info("AI 纪要生成中 | 任务ID=%s | 已接收 %d 字，思考 %d 字 | 预计还需约 %.0f 秒 | 耗时 %.0f 秒", job_id, chars, thinking, eta, elapsed)
+
+    result = llm_refine.summarize(row["text"], config["base_url"], config["model"], config["api_key"], progress=progress)
+    update(job_id, refine_status="done", summary=result["summary"], refine_usage=json.dumps(result["usage"], ensure_ascii=False), refine_error="", refine_at=time.time())
+    task_event(job_id, "提炼", "AI 纪要完成，耗时 %.1f 秒，%s" % (time.time() - started, _usage_note(result["usage"])))
+
+
+def run_corrected(job_id, config):
+    started = time.time()
+    with db() as conn:
+        row = conn.execute("SELECT text FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if row is None or not row["text"]:
+        raise llm_refine.RefineError("没有可提炼的转写文字")
+    task_event(job_id, "提炼", "全文净化开始：模型 %s，转写 %d 字" % (config["model"], len(row["text"])))
+
+    def on_segment(done, total):
+        update(job_id, corrected_progress="%d/%d" % (done, total))
+        task_event(job_id, "提炼", "全文净化进度：%d/%d 段完成" % (done, total))
+
+    result = llm_refine.correct_text(row["text"], config["base_url"], config["model"], config["api_key"], on_segment=on_segment)
+    update(job_id, corrected_status="done", refined_text=result["corrected"], corrected_usage=json.dumps(result["usage"], ensure_ascii=False), corrected_error="", corrected_progress="", corrected_at=time.time())
+    task_event(job_id, "提炼", "全文净化完成，耗时 %.1f 秒，%s" % (time.time() - started, _usage_note(result["usage"])))
+
+
+def _corrected_phase(job_id, config):
     try:
-        config = llm_settings()
-        with db() as conn:
-            row = conn.execute("SELECT text FROM jobs WHERE id=?", (job_id,)).fetchone()
-        if row is None or not row["text"]:
-            raise llm_refine.RefineError("没有可提炼的转写文字")
-        task_event(job_id, "提炼", "AI 提炼开始：模型 %s，转写 %d 字" % (config["model"], len(row["text"])))
+        run_corrected(job_id, config)
+    except Exception as exc:
+        reason = str(exc)[:200] or exc.__class__.__name__
+        update(job_id, corrected_status="failed", corrected_error=reason, corrected_progress="", corrected_at=time.time())
+        task_event(job_id, "提炼", "全文净化失败：" + reason)
 
-        def progress(chars, thinking, elapsed, eta):
-            if eta is None:
-                log.info("AI 提炼进行中 | 任务ID=%s | 思考中，已 %d 字 | 耗时 %.0f 秒", job_id, thinking, elapsed)
-            else:
-                log.info("AI 提炼进行中 | 任务ID=%s | 已接收 %d 字，思考 %d 字 | 预计还需约 %.0f 秒 | 耗时 %.0f 秒", job_id, chars, thinking, eta, elapsed)
 
-        result = llm_refine.refine(row["text"], config["base_url"], config["model"], config["api_key"], progress=progress)
-        update(job_id, refine_status="done", refined_text=result["corrected"], summary=result["summary"], refine_error="", refine_at=time.time())
-        task_event(job_id, "提炼", "AI 提炼完成，耗时 %.1f 秒" % (time.time() - started))
+def run_refine(job_id):
+    config = llm_settings()
+    try:
+        run_summary(job_id, config)
     except Exception as exc:
         reason = str(exc)[:200] or exc.__class__.__name__
         update(job_id, refine_status="failed", refine_error=reason, refine_at=time.time())
-        task_event(job_id, "提炼", "AI 提炼失败：" + reason)
+        task_event(job_id, "提炼", "AI 纪要生成失败：" + reason)
+        return
+    update(job_id, corrected_status="running", corrected_error="", corrected_progress="")
+    _corrected_phase(job_id, config)
+
+
+def run_corrected_retry(job_id):
+    _corrected_phase(job_id, llm_settings())
 
 
 def maybe_refine(job_id):
@@ -225,7 +318,7 @@ def maybe_refine(job_id):
     if row is None or row["status"] != "done":
         return
     if claim_refine(job_id):
-        run_refine(job_id)
+        threading.Thread(target=run_refine, args=(job_id,), daemon=True).start()
 
 
 def clean_expired():
@@ -280,7 +373,7 @@ def transcribe(job, recognizer, clock_started=None):
         update(job_id, started=time.time())
     try:
         check_cancel(job_id)
-        update(job_id, status="converting", progress=1, backend="local_cpu", backend_name=LOCAL_NODE_NAME, engine_name=LOCAL_ENGINE)
+        update(job_id, status="converting", progress=1, backend="local_cpu", backend_name=LOCAL_NODE_NAME, engine_name=LOCAL_ENGINE, hardware_name=LOCAL_HARDWARE)
         task_event(job_id, "执行", "使用本机 CPU 转写，先转换音频格式")
         command = [
             "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
@@ -394,7 +487,7 @@ def dispatch(job, recognizer):
                 seen_phase.add(status)
         result = remote.run(job_id, DATA / (job_id + ".upload"), progress, stop, lambda: check_cancel(job_id))
         check_cancel(job_id)
-        update(job_id, status="done", progress=100, text=result["text"], duration=round(result["duration"], 2), finished=time.time(), elapsed=round(time.monotonic() - clock_started, 3), backend="remote_gpu", backend_name=str(result.get("backend_name", "电脑 GPU"))[:80], engine_name=REMOTE_ENGINE, worker_note="通过局域网由电脑 GPU 完成")
+        update(job_id, status="done", progress=100, text=result["text"], duration=round(result["duration"], 2), finished=time.time(), elapsed=round(time.monotonic() - clock_started, 3), backend="remote_gpu", backend_name=str(result.get("backend_name", "电脑 GPU"))[:80], engine_name=REMOTE_ENGINE, hardware_name=str(result.get("hardware") or "")[:200], worker_note="通过局域网由电脑 GPU 完成")
         task_event(job_id, "完成", "电脑 GPU 转写完成，录音 %.1f 秒，总耗时 %.2f 秒" % (result["duration"], time.monotonic() - clock_started))
         clean_audio(job_id)
         remote.release(job_id)
@@ -415,7 +508,7 @@ def dispatch(job, recognizer):
             remote.release(job_id)
         if stop.is_set():
             return  # Retain audio for recovery on the next start.
-        update(job_id, status="converting", progress=1, text="", backend="local_cpu", backend_name=LOCAL_NODE_NAME, engine_name=LOCAL_ENGINE, worker_note="未使用电脑：" + reason + "；已自动切换到本机转写")
+        update(job_id, status="converting", progress=1, text="", backend="local_cpu", backend_name=LOCAL_NODE_NAME, engine_name=LOCAL_ENGINE, hardware_name=LOCAL_HARDWARE, worker_note="未使用电脑：" + reason + "；已自动切换到本机转写")
         task_event(job_id, "调度", "未使用电脑：" + reason + "；使用 " + LOCAL_NODE_NAME)
     transcribe(job, recognizer, clock_started)
 
@@ -424,7 +517,7 @@ def worker():
     global ready, engine_failed, active_job
     try:
         recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
-            model=str(MODEL / "model.int8.onnx"), tokens=str(MODEL / "tokens.txt"),
+            model=str(MODEL / "model.onnx"), tokens=str(MODEL / "tokens.txt"),
             num_threads=ASR_THREADS, use_itn=True, debug=False,
         )
         ready = True
@@ -485,11 +578,24 @@ async def lifespan(app):
                 conn.execute("ALTER TABLE jobs ADD COLUMN " + column + " TEXT DEFAULT '" + default + "'")
         if "refine_at" not in columns:
             conn.execute("ALTER TABLE jobs ADD COLUMN refine_at REAL DEFAULT NULL")
+        if "corrected_status" not in columns:
+            conn.execute("ALTER TABLE jobs ADD COLUMN corrected_status TEXT DEFAULT 'none'")
+            # 旧版一次调用同时产出修正与纪要：已有修正文的旧记录直接视为净化完成
+            conn.execute("UPDATE jobs SET corrected_status='done' WHERE refine_status='done' AND refined_text!=''")
+        for column, default in (("corrected_error", ""), ("corrected_progress", ""), ("refine_usage", ""), ("corrected_usage", ""), ("hardware_name", "")):
+            if column not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN " + column + " TEXT DEFAULT '" + default + "'")
+        if "corrected_at" not in columns:
+            conn.execute("ALTER TABLE jobs ADD COLUMN corrected_at REAL DEFAULT NULL")
         conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL)")
         conn.execute("CREATE TABLE IF NOT EXISTS job_events (id INTEGER PRIMARY KEY AUTOINCREMENT,job_id TEXT NOT NULL,created REAL NOT NULL,event TEXT NOT NULL,message TEXT NOT NULL)")
         conn.execute("CREATE INDEX IF NOT EXISTS job_events_job_id ON job_events(job_id,id)")
+        conn.execute("""CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created REAL NOT NULL,
+            event TEXT NOT NULL, code TEXT DEFAULT '', ip TEXT DEFAULT '', detail TEXT DEFAULT '')""")
         conn.execute("UPDATE jobs SET status='queued', progress=0, text='', started=NULL, elapsed=NULL WHERE status IN ('converting','processing','remote_upload','remote_processing')")
         conn.execute("UPDATE jobs SET refine_status='failed', refine_error='服务重启时 AI 提炼中断，请重新提炼' WHERE refine_status='running'")
+        conn.execute("UPDATE jobs SET corrected_status='failed', corrected_error='服务重启时全文净化中断，可单独重试', corrected_progress='' WHERE corrected_status='running'")
     threading.Thread(target=worker, daemon=True).start()
     yield
     stop.set()
@@ -528,13 +634,15 @@ async def protect(request: Request, call_next):
 
 
 @app.get("/")
-def index():
+def index(request: Request):
+    if not authenticated(request):
+        audit("访问登录页", ip=request.headers.get("x-real-ip") or request.client.host)
     return FileResponse("/app/index.html")
 
 
 @app.get("/api/health")
 def health():
-    return {"ready": ready, "failed": engine_failed, "version": "1.5.8"}
+    return {"ready": ready, "failed": engine_failed, "version": "1.6.1", "local_engine": LOCAL_ENGINE}
 
 
 @app.get("/api/worker-config")
@@ -622,8 +730,8 @@ def test_llm_config():
     if not config["api_key"]:
         return {"ok": False, "message": "请先填写 API Key 并保存"}
     try:
-        llm_refine.refine("这是一条测试。", config["base_url"], config["model"], config["api_key"], timeout=60)
-        return {"ok": True, "message": "连接成功，模型 " + config["model"] + " 已返回测试结果"}
+        llm_refine.summarize("这是一条测试。", config["base_url"], config["model"], config["api_key"], timeout=60)
+        return {"ok": True, "message": "连接成功，模型 " + config["model"] + " 已返回测试纪要"}
     except llm_refine.RefineError as exc:
         return {"ok": False, "message": str(exc)}
 
@@ -645,6 +753,25 @@ def refine_job(job_id: str):
     return {"ok": True, "refine_status": "running"}
 
 
+@app.post("/api/jobs/{job_id}/refine-corrected")
+def refine_corrected_job(job_id: str):
+    with db() as conn:
+        row = conn.execute("SELECT status, refine_status FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "任务不存在或已过期")
+    if row["status"] != "done":
+        raise HTTPException(409, "转写完成后才能提炼")
+    if row["refine_status"] != "done":
+        raise HTTPException(409, "请先成功生成纪要，再重试全文净化")
+    config = llm_settings()
+    if not config["enabled"] or not config["api_key"]:
+        raise HTTPException(409, "请先在设置中启用 AI 提炼并填写 API Key")
+    if not claim_corrected(job_id):
+        raise HTTPException(409, "全文净化正在进行，请稍候")
+    threading.Thread(target=run_corrected_retry, args=(job_id,), daemon=True).start()
+    return {"ok": True, "corrected_status": "running"}
+
+
 @app.post("/api/login")
 async def login(request: Request):
     ip = request.headers.get("x-real-ip") or request.client.host
@@ -663,8 +790,10 @@ async def login(request: Request):
         raise HTTPException(400, "请求格式无效")
     if not hmac.compare_digest(code.encode(), ACCESS_CODE.encode()):
         attempts.append(now)
+        audit("登录失败", code=code, ip=ip)
         raise HTTPException(401, "访问口令不正确")
     attempts.clear()
+    audit("登录成功", ip=ip)
     payload = str(int(time.time() + SESSION_TTL)) + "." + secrets.token_hex(16)
     token = payload + "." + hmac.new(SECRET, payload.encode(), hashlib.sha256).hexdigest()
     response = JSONResponse({"ok": True})
@@ -673,10 +802,18 @@ async def login(request: Request):
 
 
 @app.post("/api/logout")
-def logout():
+def logout(request: Request):
+    audit("退出登录", ip=request.headers.get("x-real-ip") or request.client.host)
     response = JSONResponse({"ok": True})
     response.delete_cookie("atow_session", secure=COOKIE_SECURE, httponly=True, samesite="strict")
     return response
+
+
+@app.get("/api/audit")
+def audit_entries():
+    with db() as conn:
+        rows = conn.execute("SELECT created,event,code,ip FROM audit_log ORDER BY id DESC LIMIT 200").fetchall()
+    return [dict(row) for row in rows]
 
 
 @app.get("/api/jobs")
@@ -738,8 +875,8 @@ def download(job_id: str, part: str = "original"):
     if job["status"] != "done":
         raise HTTPException(409, "转写尚未完成")
     if part == "refined":
-        if job["refine_status"] != "done" or not job["refined_text"]:
-            raise HTTPException(409, "AI 优化原文尚未生成")
+        if job["corrected_status"] != "done" or not job["refined_text"]:
+            raise HTTPException(409, "全文净化尚未完成")
         return PlainTextResponse(job["refined_text"], headers={"Content-Disposition": 'attachment; filename="transcript-ai.txt"'})
     if part == "summary":
         if job["refine_status"] != "done" or not job["summary"]:

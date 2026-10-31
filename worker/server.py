@@ -4,6 +4,7 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+import platform
 from pathlib import Path
 import re
 import shutil
@@ -40,10 +41,71 @@ torch = None
 engine_ready = False
 engine_reason = "initializing"
 backend_name = "RTX 5080 GPU"
+model_precision = "initializing"
+hardware_name = ""
 stopping = threading.Event()
 MAX_BYTES = 300 * 1024 * 1024
 MAX_SECONDS = 10800
+# Dynamic batch duration budget; keep FP32 and the existing VAD segment sizes.
+BATCH_SIZE_S = 300
 ID = re.compile(r"^[a-f0-9]{32}$")
+
+
+def cpu_name():
+    if sys.platform == "win32":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as key:
+                return winreg.QueryValueEx(key, "ProcessorNameString")[0]
+        except OSError:
+            pass
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as info:
+            for line in info:
+                if line.startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor() or ""
+
+
+def total_ram_gb():
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            status = MEMORYSTATUSEX()
+            status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return status.ullTotalPhys / (1024 ** 3)
+        except Exception:
+            pass
+        return None
+    try:
+        with open("/proc/meminfo", encoding="utf-8", errors="replace") as info:
+            for line in info:
+                if line.startswith("MemTotal"):
+                    return int(line.split()[1]) / 1024 / 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def describe_hardware():
+    parts = ["%s · %.0f GB 显存" % (torch.cuda.get_device_name(0), torch.cuda.get_device_properties(0).total_memory / 1024 ** 3)]
+    cpu = cpu_name()
+    if cpu:
+        parts.append(cpu)
+    ram = total_ram_gb()
+    if ram:
+        parts.append("%.0f GB 内存" % ram)
+    return " · ".join(parts)
 
 
 class WorkerCancelled(Exception):
@@ -105,7 +167,7 @@ def janitor():
 
 
 def initialize():
-    global torch, engine, engine_ready, engine_reason, backend_name
+    global torch, engine, engine_ready, engine_reason, backend_name, model_precision, hardware_name
     try:
         import torch as torch_module
         from funasr import AutoModel
@@ -124,6 +186,7 @@ def initialize():
         )
         if next(engine.model.parameters()).device.type != "cuda":
             raise RuntimeError("The ASR model is not on CUDA")
+        model_precision = str(next(engine.model.parameters()).dtype).removeprefix("torch.")
         # Interrupt eager PyTorch inference at module boundaries, including VAD.
         hooked = set()
         for root in (engine.model, engine.vad_model):
@@ -137,9 +200,10 @@ def initialize():
         torch.cuda.synchronize()
         del warm
         backend_name = torch.cuda.get_device_name(0) + " GPU"
+        hardware_name = describe_hardware()
         engine_ready = True
         engine_reason = "ready"
-        log.info("GPU transcription service ready on %s", backend_name)
+        log.info("GPU transcription service ready on %s | batch_size_s=%s | precision=%s", backend_name, BATCH_SIZE_S, model_precision)
     except Exception:
         engine_reason = "cuda_unavailable"
         log.exception("GPU initialization failed; worker stays unavailable")
@@ -206,7 +270,7 @@ def process(job_id):
             save(job)
         from funasr.utils.postprocess_utils import rich_transcription_postprocess
         result = engine.generate(input=str(converted), cache={}, language="auto", use_itn=True,
-                                 batch_size_s=60, merge_vad=True, merge_length_s=15,
+                                 batch_size_s=BATCH_SIZE_S, merge_vad=True, merge_length_s=15,
                                  disable_pbar=True, disable_log=True)
         check_cancel(job_id)
         text = "\n".join(rich_transcription_postprocess(item.get("text", "")).strip() for item in result).strip()
@@ -285,7 +349,7 @@ class Handler(BaseHTTPRequestHandler):
                     available = False
                     reason = "cuda_unavailable"
             with lock:
-                self.reply(200, {"ready": available, "busy": active is not None, "reason": "busy" if active is not None else reason, "name": backend_name, "protocol": 1})
+                self.reply(200, {"ready": available, "busy": active is not None, "reason": "busy" if active is not None else reason, "name": backend_name, "protocol": 1, "batch_size_s": BATCH_SIZE_S, "precision": model_precision, "hardware": hardware_name})
             return
         job_id = self.job_id()
         if job_id:
@@ -313,7 +377,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(409, {"error": "Task already exists"})
                 return
             active = job_id
-            jobs[job_id] = {"id": job_id, "status": "uploading", "progress": 1, "created": time.time(), "backend_name": backend_name}
+            jobs[job_id] = {"id": job_id, "status": "uploading", "progress": 1, "created": time.time(), "backend_name": backend_name, "hardware": hardware_name}
         try:
             received = 0
             deadline = time.monotonic() + 330

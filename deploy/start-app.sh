@@ -16,4 +16,4 @@ chown 10001:10001 /opt/atow/data
   -v /opt/atow/models:/models:ro \
   --health-cmd 'python -c "import json,urllib.request,sys; sys.exit(not json.load(urllib.request.urlopen(\"http://127.0.0.1:8787/api/health\",timeout=3))[\"ready\"])"' \
   --health-interval 30s --health-timeout 5s --health-start-period 120s \
-  "${ATOW_APP_IMAGE:-atow-transcriber:records-v2}"
+  "${ATOW_APP_IMAGE:-atow-transcriber:1.6.1-ecs}"

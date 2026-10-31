@@ -9,7 +9,8 @@ RUN pip install -r requirements.txt \
     && groupadd --gid 10001 atow \
     && useradd --uid 10001 --gid 10001 --create-home atow \
     && mkdir /data && chown 10001:10001 /data
-COPY build-assets/models/ /opt/atow-models/
+COPY build-assets/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/ /opt/atow-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/
+COPY build-assets/models/silero_vad.onnx /opt/atow-models/silero_vad.onnx
 COPY service/app.py service/index.html service/remote_worker.py service/llm_refine.py ./
 COPY deploy/nas/entrypoint.py /usr/local/bin/atow-entrypoint.py
 LABEL org.opencontainers.image.title="Shengjian ARM64 NAS" \

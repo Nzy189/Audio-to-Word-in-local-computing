@@ -29,6 +29,7 @@
 - NAS 与电脑的连接密钥校验已删除，无需 token 或导入电脑配置文件；NAS 网页仍使用 `ACCESS_CODE` 口令登录。
 - 自动回退：电脑关机、休眠、忙碌、显存不足或出错时改用 NAS CPU，任务日志说明为什么没有使用电脑。
 - 任务记录：录音时长、处理耗时、提交/开始/完成时间、实际设备与引擎，点击查看全文，支持复制与 TXT 下载。
+- AI 提炼：支持 OpenAI 兼容 API，生成优化正文、分类概要和遗留任务；保留原始转写，支持重新提炼、进度日志与剩余时间预估。
 - 终止任务：排队、NAS CPU、电脑 GPU 任务均可终止，两端临时音频清理后才显示终态。
 - 自动识别中文、英文、粤语、日语和韩语；文字记录保留 7 天。
 
@@ -36,6 +37,7 @@
 
 - **极空间 Z2 Pro（ARM64 NAS）**：见 [deploy/nas/README.md](deploy/nas/README.md)。导入镜像、挂载原 `/data`、保留网页口令即可，无需任何电脑配置文件。
 - **Windows GPU 服务**：见 [worker/README.md](worker/README.md)。复用现有 FunASR 环境，登录 Windows 后自启。
+- **ECS（x86_64）**：见 [deploy/ecs/README.md](deploy/ecs/README.md)。使用独立 amd64 镜像，在 ECS 本机 CPU 转写，AI 服务通过网页配置。
 
 ## 项目结构
 
@@ -47,4 +49,4 @@
 | `deploy/`（其余） | 原 ECS 部署与运维文件 |
 | `PROJECT_STATUS.md` | 开发状态主文档：进度、验证、地址、凭据位置、下一步 |
 
-当前版本 1.4（免密钥电脑加速）。构建完成的安装包位于本地 `dist/`，不入库；真实部署状态以 PROJECT_STATUS.md 为准。
+当前源码版本 1.6.1（在 1.6.0 两段式 AI 提炼、分区 token 用量与识别硬件显示之上，新增访问审计与详情页时间字段合并；CPU 识别为 SenseVoice FP32）。NAS 最新已发布包仍为 1.5.8；安装包位于本地 `dist/`，不入库；真实部署状态以 PROJECT_STATUS.md 为准。

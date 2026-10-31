@@ -46,6 +46,7 @@
 - 主机名 CANAL，Windows 11；AMD Ryzen 9 9950X3D，NVIDIA RTX 5080，约 16 GB 显存。
 - 曾核查 NVIDIA 驱动 617.42、GPU compute capability 12.0。
 - 复用用户现有环境：`F:\Claude Code Project\DeepTutor\FunASR\.venv`。
+- FunASR 为 editable 安装，实际源码在 `F:\Claude Code Project\DeepTutor\FunASR\funasr\`，不要假定 `site-packages/funasr/` 一定存在。GPU worker 当前源码动态批次预算 `batch_size_s=300`（由 60 调高，按分段时长/补齐成本组批，并非文件个数），一次一个任务，保留 FP32；`merge_length_s=15`、VAD 最长片段 30 秒，PyTorch CPU 线程 4。`/v1/health` 返回 batch_size_s 与模型参数实际 precision，启动日志也记录这些值。参数需在空闲时重启后才生效，历史安装包不随源码更新。性能评估须看负载期耗时与峰值显存，空闲 nvidia-smi 不能证明是否跑满。
 - 已核查版本：Python 3.12.13、PyTorch 2.11.0+cu128、torchaudio 2.11.0+cu128、FunASR 1.4.16。
 - GPU 服务采用标准库 HTTP 服务，不需要向原 FunASR 虚拟环境追加 FastAPI/Uvicorn，未修改原 FunASR 仓库代码或重装其依赖。
 - FFmpeg 使用现有 WinGet 安装的 `ffmpeg-9.0.2-full_build`。`worker/server.py` 会自动查找完整路径，不依赖交互终端先激活或追加 PATH。
@@ -81,7 +82,8 @@ C:\Users\nzy189\.cache\modelscope\models\iic--speech_fsmn_vad_zh-cn-16k-common-p
 
 | 执行位置 | 引擎 | 模型 / 运行方式 |
 | --- | --- | --- |
-| NAS / 原 ECS CPU | `SenseVoice INT8 / sherpa-onnx CPU` | ONNX INT8 模型 + Silero VAD，16 kHz 单声道转换，分段识别 |
+| ECS 1.5.9 CPU | `SenseVoice FP32 / sherpa-onnx CPU` | ONNX FP32 模型 + Silero VAD；16 kHz 单声道转换、分段识别，模型外置挂载 |
+| NAS 已发布版本 / 旧 ECS CPU | `SenseVoice INT8 / sherpa-onnx CPU` | 原 ONNX INT8 模型 + Silero VAD；NAS FP32 镜像尚未构建 |
 | Windows GPU | `SenseVoiceSmall / FunASR CUDA` | 现有 FunASR + PyTorch CUDA + FSMN VAD，明确验证模型参数在 CUDA 上 |
 | NAS（AI 提炼） | OpenAI 兼容 API（默认百炼专属端点 + kimi-k3） | SSE 流式；不发送 temperature（推理模型拒绝）；进度与 ETA 写容器日志 |
 
@@ -93,11 +95,27 @@ GPU 服务一次处理一个任务；未就绪、忙碌或空闲显存不足时 
 
 ### 最新发布物
 
-**ECS amd64** 发布目录 `dist/shengjian-1.5.8-ecs/`：
+**1.6.1 待部署源码包（不代表已发布镜像）：** `dist/shengjian-1.6.1-ecs/source.tgz`，30,016 字节，SHA-256 `0a21bc4790c19c2e715804cb9a89437ee6104400aac0a7764c493d2d89c86327`；已上传 `/opt/atow/releases/1.6.1-ecs/`。自动审批因错误口令明文留存未获明确授权而拦截部署，镜像尚未构建；当前实际版本见主状态文档。
+
+**ECS 1.6.0**：
+
+- 镜像 `atow-transcriber:1.6.0-ecs`，ID 前缀 `b01037c9d7fe`；在 ECS 用 `deploy/ecs/Dockerfile.upgrade` 并指定 `BASE_IMAGE=atow-transcriber:1.5.9-ecs` 复用原依赖构建，模型继续使用原 FP32 挂载。
+- 本地源码包 `dist/shengjian-1.6.0-ecs/source.tgz`，SHA-256 `aef3b8c2f32deed242f161da48c0dce536157a41bac481e38f6415cce594d97f`；附 BUILD-INFO.json、DEPLOYMENT.json。服务器目录 `/opt/atow/releases/1.6.0-ecs/`，未导出新版本地镜像 tar。包中无凭据、模型或用户数据。
+- 启动模板 `deploy/start-app.sh` 默认镜像为 1.6.0；保留 `/opt/atow/data`、模型、app.env 与原资源/安全限制。1.6.0 在原库增加七列，旧完成提炼回填 corrected_status=done；旧硬件信息不补造。
+
+**ECS 1.5.9 FP32**：
+
+- 镜像 `atow-transcriber:1.5.9-ecs`，ID 前缀 `12f262fb8831`，在 ECS 基于 `atow-transcriber:1.5.8-ecs` 复用依赖就地构建；Dockerfile 为 `deploy/ecs/Dockerfile.upgrade`。
+- 源码包 `dist/shengjian-1.5.9-ecs/source.tgz`；SHA-256 `fcb6086fc7d90efab249269565f9b51e3ee653a6bcf63ef1969ed4b752809fa6`。服务器发布目录 `/opt/atow/releases/1.5.9-ecs/`，没有导出新版本地 Docker tar；部署结果见本地 DEPLOYMENT.json 与主状态文档。
+- FP32 文件 `/opt/atow/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.onnx`，937,617,178 字节，SHA-256 `977016bd9c79f9eb343430b5cc305e07ab64d5212dff41b0dcfa1694bee9a8cb`。本地同名目录位于 `build-assets/models/`；tokens.txt 与 LICENSE 同目录，Silero VAD 继续放在模型根目录。
+- 下载源为发布者公开仓库 `https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17`，校验信息来自仓库模型 API。使用 `python deploy/fetch-fp32.py --models-dir 模型根目录` 可下载并校验，只写入新目录，不覆盖原 INT8 文件。
+- NAS 最新已发布包仍为下述 1.5.8，**没有 NAS FP32 新镜像或安装包**。新源码的 NAS Dockerfile 已改为只复制 FP32 目录及 VAD，后续构建前需完成资源评估与版本同步。
+
+**ECS amd64 历史包** `dist/shengjian-1.5.8-ecs/`：
 
 - 镜像归档 `atow-ecs-amd64.tar`：123,867,136 字节；SHA-256 `2aaba7e70a8999b609f86879559551bb4baec6a977784bf9e3fc3c30e4cd17d7`。
 - 镜像标签 `atow-transcriber:1.5.8-ecs`；归档 manifest/config 已核对 `linux/amd64`。
-- 附 `start-app.sh`、`README.md`、`BUILD-INFO.json`、`SHA256SUMS.txt`，不含凭据、模型或用户数据，模型继续复用服务器原挂载。**仅本地构建与隔离验证通过，尚未上传或安装到 ECS。**
+- 附 `start-app.sh`、`README.md`、`BUILD-INFO.json`、`SHA256SUMS.txt`，不含凭据、模型或用户数据，模型继续复用服务器原挂载。是否已实际部署及当前版本以 PROJECT_STATUS.md 为准；BUILD-INFO 保留构建时信息。
 
 **NAS ARM64** 发布目录 `dist/shengjian-1.5.8/`：
 
@@ -110,7 +128,7 @@ GPU 服务一次处理一个任务；未就绪、忙碌或空闲显存不足时 
 
 | 文件 / 目录 | 职责 |
 | --- | --- |
-| `service/app.py` | FastAPI、认证、SQLite、任务调度、本地 CPU、电脑地址设置（默认内置）、状态检测、事件日志、终止与清理、AI 提炼挂接与设置接口 |
+| `service/app.py` | FastAPI、认证、SQLite、任务调度、本地 CPU、电脑地址设置（默认内置）、状态检测、事件日志、访问审计（未登录访问/登录尝试/退出，audit_log 表）、终止与清理、AI 提炼挂接与设置接口 |
 | `service/llm_refine.py` | AI 提炼客户端：OpenAI 兼容 API 调用、Key 掩码、超时与重试、结果解析（优化正文 + 要点概要） |
 | `service/remote_worker.py` | LAN 电脑客户端（无密钥）、分类型连接失败、流式发送、状态轮询、取消和结果确认 |
 | `service/index.html` | 手机适配单页：上传、电脑在线状态显示、地址修改、AI 提炼设置卡、历史、详情（AI 内容/原文双页签）、日志、终止、下载 |
@@ -131,10 +149,13 @@ GPU 服务一次处理一个任务；未就绪、忙碌或空闲显存不足时 
 | `deploy/start-app.sh`、`start-web.sh` | 原 ECS 容器启动脚本，不能与 NAS 配置混淆 |
 | `deploy/ecs/README.md` | 当前 ECS amd64 镜像、保留原数据的升级与回滚顺序 |
 | `deploy/ecs/run-qa.py`、`verify-smoke.py` | 隔离 ECS 镜像 QA：随机容器与 tmpfs、旧库迁移、CPU 转写、stub AI 提炼与下载；不操作生产 |
+| `deploy/ecs/Dockerfile.upgrade` | 复用已部署镜像依赖，只复制应用源码；1.6.0 部署显式指定 BASE_IMAGE=atow-transcriber:1.5.9-ecs |
+| `deploy/ecs/check-preservation.py` | 迁移前后比较既有记录字段、settings 和会话文件摘要；仅保存摘要与记录 ID，不输出原文或凭据；以数据库所属 UID 运行 |
+| `deploy/fetch-fp32.py` | 下载 FP32 模型、断线续传、文件大小/SHA-256 校验；保留 INT8 原目录 |
 | `deploy/atow-*.service`、`*.timer` | ECS 运行时与 HTTPS 续期 |
 | `build-assets/models/` | 构建用模型文件，已忽略，不是业务录音 |
 | `test-results/` | 公开样例与测试截图，已忽略，不打入镜像 |
-| `dist/` | 历史/当前发布包，已忽略；最新是 1.5.8 |
+| `dist/` | 已忽略的发布文件；ECS 源码包当前 1.6.0，NAS 最新安装包 1.5.8 |
 
 ## 5. 配置、凭据与持久化
 
@@ -209,10 +230,10 @@ queued → remote_upload → remote_processing → done
 | `deploy/nas/verify-cancellation.py` | 排队/本机/实际 GPU 终止与音频清理，使用公开合成的一小时 WAV |
 | `deploy/nas/verify-cancel-race.py` | 取消与断线竞争、重启恢复，隔离临时数据库 |
 | `deploy/nas/browser-settings-check.cjs` | 无导入/无密钥状态卡、任务日志、终止、下载与手机 QA；会重置隔离 QA 的设置 |
-| `deploy/nas/stub-llm.py` | QA 用容器内 stub OpenAI 兼容服务（按 model 名分流正常/垃圾/500/延迟，SSE 协议），不是产品组件 |
-| `deploy/nas/verify-refine.py` | AI 提炼两阶段容器验证（`a`：无 env 默认与旧库迁移；`b`：stub 全链路），需要隔离 QA 容器 |
-| `deploy/nas/browser-refine-check.cjs` | AI 设置卡、双页签、概要复制/下载与手机 QA；会重置隔离 QA 的设置 |
-| `tests/test_llm_refine.py` | 提炼客户端单测（12 项，含 SSE 错误、进度回调和 ETA） |
+| `deploy/nas/stub-llm.py` | QA 用容器内 stub OpenAI 兼容服务（按 system prompt 分纪要/净化两相，末块附 usage；按 model 名分流 500/延迟/净化失败，SSE 协议），不是产品组件 |
+| `deploy/nas/verify-refine.py` | AI 提炼容器验证（`a`：无 env 默认与旧库迁移；`b`：stub 全链路，含两段时序、净化单独重试与双 409），需要隔离 QA 容器 |
+| `deploy/nas/browser-refine-check.cjs` | AI 设置卡、双页签、两段渲染与 usage 行、识别硬件行、概要复制/下载与手机 QA；会重置隔离 QA 的设置 |
+| `tests/test_llm_refine.py` | 提炼客户端单测（18 项：两相纯文本、usage 实测/估算、切段并行、段失败/重试、SSE 错误、进度与 ETA） |
 | `deploy/ecs/run-qa.py` | 本地 ECS amd64 镜像 QA，创建随机名容器与 tmpfs 并自动清理；不可改为生产容器 |
 
 **不要把测试脚本中的 QA 容器名改成用户的生产容器直接执行。** 测试会上传/删除任务，部分还会重启容器、清空 QA 连接设置。应先阅读脚本中的固定端口、名称、路径和测试前置条件。
@@ -278,6 +299,8 @@ journalctl -u atow-renew.service --no-pager -n 50
 ```
 
 ECS 原启动/网关/证书文件均在 `/opt/atow`，主要容器为 `atow-app`、`atow-web`。不要为处理 NAS 问题顺手覆盖 ECS 生产服务，也不要在原 CentOS 7 上安装不兼容的新运行时。
+
+修改 ECS 网页口令时，只更新受保护的 `/opt/atow/app.env` 中 ACCESS_CODE，不修改 SSH 密码。环境变量更新必须以同一镜像重建应用容器，仅 `docker restart` 不会重读 env 文件。操作前确认转写和 AI 提炼均空闲，备份原配置及容器信息到服务器 0700 目录（凭据文件 0600），继续使用原数据、模型挂载及其余环境设置。新口令通过隐藏输入传入，不放入命令参数、日志或文档；完成后只确认健康状态和新口令登录。原会话签名配置保持原样，已有登录会话继续有效。
 
 ## 9. 已遇到的问题和应避免重复的误判
 

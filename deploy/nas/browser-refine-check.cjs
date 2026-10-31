@@ -36,14 +36,19 @@ const assert = require('node:assert/strict');
   await page.waitForFunction(()=>document.querySelector('#resultName').textContent.includes('已完成'),null,{timeout:120000});
   const id=await page.locator('.job.active').getAttribute('data-job-id');created.push(id);
   await page.waitForFunction(()=>!document.querySelector('#copySummary').disabled&&document.querySelector('#refinedText').value.length>0,null,{timeout:120000});
-  ok('3 upload reaches done and auto refine reaches done');
+  await page.waitForFunction(()=>!document.querySelector('#summaryUsage').classList.contains('hidden')&&!document.querySelector('#correctedUsage').classList.contains('hidden'),null,{timeout:15000});
+  ok('3 upload reaches done; summary first then corrected, both usage lines shown');
   // 4. tabs appear, default on AI content, both fields filled, both marked AI 生成
   assert.equal(await page.locator('#refineTabs').isVisible(),true);
   assert.equal(await page.locator('#tabAi').evaluate(e=>e.classList.contains('active')),true);
   assert.equal(await page.locator('#aiPane').isVisible(),true);
   assert.equal(await page.locator('#result').isVisible(),false);
-  assert.equal(await page.locator('#refinedText').inputValue(),'这是优化后的测试原文');
-  assert.equal(await page.locator('#summaryText').inputValue(),'- 测试要点');
+  const refinedValue=await page.locator('#refinedText').inputValue();
+  assert.ok(refinedValue.length>0&&refinedValue.split('\n').every(l=>l.startsWith('净')),'refined prefix: '+refinedValue.slice(0,40));
+  assert.equal(await page.locator('#summaryText').inputValue(),'【测试】\n- 测试要点');
+  const metaText=await page.locator('#resultMeta').textContent();
+  assert.match(metaText,/识别硬件/);
+  assert.ok(!metaText.includes('识别硬件未记录'),'hardware should be recorded: '+metaText.slice(0,200));
   const tags=await page.locator('#aiPane .ai-tag').all();
   assert.equal(tags.length,2,'ai-tag count');
   for(const tag of tags){assert.equal(await tag.isVisible(),true);assert.equal(await tag.textContent(),'AI 生成');}
@@ -66,7 +71,7 @@ const assert = require('node:assert/strict');
   await page.waitForFunction(()=>document.querySelector('#toast').textContent.includes('已复制概要'),null,{timeout:10000});
   const downloadEvent=page.waitForEvent('download');await page.locator('#downloadSummary').click();const download=await downloadEvent;
   await download.saveAs('test-results/refine-browser-summary.txt');
-  assert.equal(fs.readFileSync('test-results/refine-browser-summary.txt','utf8'),'- 测试要点');
+  assert.equal(fs.readFileSync('test-results/refine-browser-summary.txt','utf8'),'【测试】\n- 测试要点');
   ok('6 summary copy and download work; regenerate button visible in done state');
   // 7. 390x844 viewport has no horizontal overflow
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=390),true,'scrollWidth '+await page.evaluate(()=>document.documentElement.scrollWidth));
@@ -91,11 +96,16 @@ const assert = require('node:assert/strict');
   assert.equal(await page.locator('#retryRefine').textContent(),'生成 AI 内容');
   await page.locator('#retryRefine').click();
   await page.waitForFunction(()=>!document.querySelector('#copySummary').disabled&&document.querySelector('#refinedText').value.length>0,null,{timeout:120000});
-  assert.equal(await page.locator('#refinedText').inputValue(),'这是优化后的测试原文');
+  const refined2=await page.locator('#refinedText').inputValue();
+  assert.ok(refined2.length>0&&refined2.split('\n').every(l=>l.startsWith('净')),'refined prefix after regenerate');
   ok('9 disabled-AI job shows no tabs; enabling shows 生成 AI 内容 which generates');
-  // 10. no browser console errors during the whole flow
+  // 10. audit panel opens and shows login events
+  await page.locator('#auditPanel').evaluate(e=>e.open=true);
+  await page.waitForFunction(()=>document.querySelector('#auditLogs').textContent.includes('登录成功'),null,{timeout:15000});
+  ok('10 audit panel shows login events');
+  // 11. no browser console errors during the whole flow
   assert.deepEqual(errors,[]);
-  ok('10 no browser console errors during the whole flow');
+  ok('11 no browser console errors during the whole flow');
   console.log('Browser refine check ALL '+passed+' PASS');
  }finally{
   if(page)for(const id of created){await page.request.post('http://127.0.0.1:18787/api/jobs/'+id+'/cancel').catch(()=>{});await page.request.delete('http://127.0.0.1:18787/api/jobs/'+id).catch(()=>{});}

@@ -82,6 +82,23 @@ def wait_refine(job_id, wanted, timeout=120):
     raise AssertionError("refine_status did not become " + wanted + " within " + str(timeout) + "s, now=" + str(job.get("refine_status")))
 
 
+def wait_corrected(job_id, wanted, timeout=120):
+    deadline = time.monotonic() + timeout
+    job = {}
+    while time.monotonic() < deadline:
+        job = json.loads(req("/api/jobs/" + job_id)[1])
+        if job["corrected_status"] == wanted:
+            return job
+        if job["corrected_status"] in ("done", "failed"):
+            raise AssertionError("corrected_status=" + str(job["corrected_status"]) + " but wanted " + wanted + " | " + str(job.get("corrected_error")))
+        time.sleep(0.5)
+    raise AssertionError("corrected_status did not become " + wanted + " within " + str(timeout) + "s, now=" + str(job.get("corrected_status")))
+
+
+def lines_prefixed(job):
+    return job["refined_text"] and all(line.startswith("净") for line in job["refined_text"].split("\n"))
+
+
 def llm_config(payload=None):
     if payload is None:
         status, raw, _ = req("/api/llm-config")
@@ -134,21 +151,29 @@ def t3():
     assert config["api_key_masked"] == "sk-***", config
     job = upload("提炼检查-env全链路.wav")
     job = wait_refine(job["id"], "done")
-    assert job["refined_text"] == "这是优化后的测试原文", repr(job["refined_text"])
-    assert job["summary"] == "- 测试要点", repr(job["summary"])
-    assert any(e["event"] == "提炼" for e in job["events"]), job["events"]
+    assert job["summary"] == "【测试】\n- 测试要点", repr(job["summary"])
+    summary_usage = json.loads(job["refine_usage"])
+    assert summary_usage["prompt_tokens"] == 100 and summary_usage["estimated"] is False, repr(job["refine_usage"])
+    job = wait_corrected(job["id"], "done")
+    assert lines_prefixed(job), repr(job["refined_text"])
+    corrected_usage = json.loads(job["corrected_usage"])
+    assert corrected_usage["prompt_tokens"] > 0 and corrected_usage["estimated"] is False, repr(job["corrected_usage"])
+    messages = [event["message"] for event in job["events"]]
+    assert any("纪要完成" in message for message in messages), messages
+    assert any("全文净化完成" in message for message in messages), messages
+    assert messages.index(next(m for m in messages if "纪要完成" in m)) < messages.index(next(m for m in messages if "全文净化完成" in m)), messages
     state["job"] = job
 
 
 def t4():
     job = state.get("job")
     assert job, "T3 job unavailable"
-    config = llm_config({"enabled": True, "model": "stub-garbage"})
-    assert config["source"] == "网页设置", config
+    llm_config({"enabled": True, "model": "stub-500"})
     status, raw, _ = req("/api/jobs/" + job["id"] + "/refine", "POST")
     assert status == 200, (status, raw)
     job = wait_refine(job["id"], "failed")
-    assert "解析" in (job["refine_error"] or ""), repr(job["refine_error"])
+    assert "500" in (job["refine_error"] or ""), repr(job["refine_error"])
+    assert job["corrected_status"] == "none", repr(job.get("corrected_status"))
     assert job["status"] == "done", repr(job["status"])
 
 
@@ -158,8 +183,8 @@ def t5():
     llm_config({"model": "stub-ok"})
     status, raw, _ = req("/api/jobs/" + job["id"] + "/refine", "POST")
     assert status == 200, (status, raw)
-    job = wait_refine(job["id"], "done")
-    assert job["refined_text"] == "这是优化后的测试原文", repr(job["refined_text"])
+    job = wait_corrected(job["id"], "done")
+    assert lines_prefixed(job), repr(job["refined_text"])
 
 
 def t6():
@@ -171,8 +196,34 @@ def t6():
     status, raw, _ = req("/api/jobs/" + job["id"] + "/refine", "POST")
     assert status == 409, (status, raw)
     assert "正在提炼中" in raw.decode("utf-8", "replace"), raw
-    job = wait_refine(job["id"], "done")
-    assert job["refined_text"] == "这是优化后的测试原文", repr(job["refined_text"])
+    status, raw, _ = req("/api/jobs/" + job["id"] + "/refine-corrected", "POST")
+    assert status == 409, (status, raw)
+    job = wait_corrected(job["id"], "done")
+    assert lines_prefixed(job), repr(job["refined_text"])
+
+
+def t6b():
+    job = state.get("job")
+    assert job, "T3 job unavailable"
+    llm_config({"model": "stub-correct-fail"})
+    status, raw, _ = req("/api/jobs/" + job["id"] + "/refine", "POST")
+    assert status == 200, (status, raw)
+    job = wait_corrected(job["id"], "failed")
+    assert job["refine_status"] == "done", repr(job["refine_status"])
+    assert job["summary"] == "【测试】\n- 测试要点", repr(job["summary"])
+    assert "500" in (job["corrected_error"] or ""), repr(job["corrected_error"])
+    llm_config({"model": "stub-slow"})
+    status, raw, _ = req("/api/jobs/" + job["id"] + "/refine-corrected", "POST")
+    assert status == 200, (status, raw)
+    status, raw, _ = req("/api/jobs/" + job["id"] + "/refine-corrected", "POST")
+    assert status == 409 and "正在进行" in raw.decode("utf-8", "replace"), (status, raw)
+    status, raw, _ = req("/api/jobs/" + job["id"] + "/refine", "POST")
+    assert status == 409, (status, raw)
+    job = wait_corrected(job["id"], "done")
+    assert job["summary"] == "【测试】\n- 测试要点", repr(job["summary"])
+    assert lines_prefixed(job), repr(job["refined_text"])
+    status, raw, _ = req("/api/jobs/" + job["id"] + "/refine-corrected", "POST")
+    assert status == 409, (status, raw)
 
 
 def t7():
@@ -188,11 +239,9 @@ def t8():
     job = state.get("job")
     assert job, "T3 job unavailable"
     status, raw, _ = req("/api/jobs/" + job["id"] + "/text?part=refined")
-    assert status == 200, (status, raw)
-    assert raw.decode("utf-8") == "这是优化后的测试原文", raw
+    assert status == 200 and raw.decode("utf-8").startswith("净"), (status, raw)
     status, raw, _ = req("/api/jobs/" + job["id"] + "/text?part=summary")
-    assert status == 200, (status, raw)
-    assert raw.decode("utf-8") == "- 测试要点", raw
+    assert status == 200 and raw.decode("utf-8") == "【测试】\n- 测试要点", raw
     status, raw, _ = req("/api/jobs/" + job["id"] + "/text?part=original")
     assert status == 200, (status, raw)
     assert len(raw.decode("utf-8")) > 4, raw
@@ -227,13 +276,14 @@ def main():
         label, total = "Phase A", 3
     elif phase == "b":
         checks = [("T3 env config full pipeline", t3),
-                  ("T4 web override and parse failure path", t4),
+                  ("T4 web override and summary failure path", t4),
                   ("T5 re-refine after failure", t5),
                   ("T6 concurrent refine rejected with 409", t6),
+                  ("T6b corrected-only failure and retry", t6b),
                   ("T7 web switch off means no refine", t7),
                   ("T8 refined/summary/original downloads", t8),
                   ("T9 outbound https to real model endpoint", t9)]
-        label, total = "Phase B", 7
+        label, total = "Phase B", 8
     else:
         raise SystemExit("usage: verify-refine.py a|b")
     ready()
