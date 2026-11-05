@@ -3,4 +3,4 @@
 ARG BASE_IMAGE=atow-transcriber:1.5.8-ecs
 FROM ${BASE_IMAGE}
 WORKDIR /app
-COPY service/app.py service/index.html service/remote_worker.py service/llm_refine.py ./
+COPY service/app.py service/index.html service/remote_worker.py service/llm_refine.py service/recording_time.py ./

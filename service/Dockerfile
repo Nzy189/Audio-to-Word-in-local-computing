@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 RUN python -c "import imageio_ffmpeg,os; os.symlink(imageio_ffmpeg.get_ffmpeg_exe(), '/usr/local/bin/ffmpeg')"
-COPY app.py index.html remote_worker.py llm_refine.py ./
+COPY app.py index.html remote_worker.py llm_refine.py recording_time.py ./
 RUN useradd --uid 10001 --create-home atow
 USER 10001:10001
 EXPOSE 8787

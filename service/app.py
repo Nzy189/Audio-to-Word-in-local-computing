@@ -20,10 +20,12 @@ from pathlib import Path
 
 import numpy as np
 import sherpa_onnx
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from remote_worker import RemoteUnavailable, RemoteWorker, TaskCancelled
+from urllib.parse import quote
 import llm_refine
+import recording_time
 
 DATA = Path(os.getenv("DATA_DIR", "/data"))
 MODELS = Path(os.getenv("MODEL_DIR", "/models"))
@@ -123,6 +125,7 @@ cancel_lock = threading.RLock()
 cancel_flags = {}
 active_job = None
 TERMINAL = ("done", "error", "cancelled")
+RECORDED_SOURCE_LABELS = {"metadata": "音频元数据", "filename": "文件名", "file_mtime": "文件修改时间", "manual": "手动设置"}
 
 
 def db():
@@ -587,6 +590,10 @@ async def lifespan(app):
                 conn.execute("ALTER TABLE jobs ADD COLUMN " + column + " TEXT DEFAULT '" + default + "'")
         if "corrected_at" not in columns:
             conn.execute("ALTER TABLE jobs ADD COLUMN corrected_at REAL DEFAULT NULL")
+        if "recorded_at" not in columns:
+            conn.execute("ALTER TABLE jobs ADD COLUMN recorded_at REAL DEFAULT NULL")
+        if "recorded_source" not in columns:
+            conn.execute("ALTER TABLE jobs ADD COLUMN recorded_source TEXT DEFAULT ''")
         conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL)")
         conn.execute("CREATE TABLE IF NOT EXISTS job_events (id INTEGER PRIMARY KEY AUTOINCREMENT,job_id TEXT NOT NULL,created REAL NOT NULL,event TEXT NOT NULL,message TEXT NOT NULL)")
         conn.execute("CREATE INDEX IF NOT EXISTS job_events_job_id ON job_events(job_id,id)")
@@ -642,7 +649,7 @@ def index(request: Request):
 
 @app.get("/api/health")
 def health():
-    return {"ready": ready, "failed": engine_failed, "version": "1.6.2", "local_engine": LOCAL_ENGINE}
+    return {"ready": ready, "failed": engine_failed, "version": "1.7.0", "local_engine": LOCAL_ENGINE}
 
 
 @app.get("/api/worker-config")
@@ -819,12 +826,12 @@ def audit_entries():
 @app.get("/api/jobs")
 def jobs():
     with db() as conn:
-        rows = conn.execute("SELECT id,name,status,progress,error,duration,created,finished,started,elapsed,backend,backend_name,worker_note,engine_name FROM jobs ORDER BY created DESC LIMIT 100").fetchall()
+        rows = conn.execute("SELECT id,name,status,progress,error,duration,created,finished,started,elapsed,backend,backend_name,worker_note,engine_name,recorded_at,recorded_source FROM jobs ORDER BY created DESC LIMIT 100").fetchall()
     return [dict(row) for row in rows]
 
 
 @app.post("/api/jobs", status_code=202)
-async def upload(file: UploadFile = File(...)):
+async def upload(file: UploadFile = File(...), last_modified: str = Form(""), tz_offset: str = Form("")):
     if not ready:
         raise HTTPException(503, "识别引擎正在准备，请稍后重试。")
     async with upload_gate:
@@ -845,15 +852,68 @@ async def upload(file: UploadFile = File(...)):
             if not size:
                 raise HTTPException(400, "文件是空的")
             name = Path((file.filename or "录音").replace("\\", "/")).name[:180]
+            received_at = time.time()
+            try:
+                recorded_at, recorded_source = await asyncio.to_thread(
+                    recording_time.detect, target, name, last_modified or None, tz_offset or None, received_at)
+            except Exception:
+                log.warning("Recording time detection failed for %s", job_id)
+                recorded_at, recorded_source = None, ""
             with db() as conn:
-                conn.execute("INSERT INTO jobs(id,name,status,created) VALUES (?,?,'queued',?)", (job_id, name, time.time()))
+                conn.execute("INSERT INTO jobs(id,name,status,created,recorded_at,recorded_source) VALUES (?,?,'queued',?,?,?)",
+                             (job_id, name, received_at, recorded_at, recorded_source))
             task_event(job_id, "接收", "录音已上传，等待开始处理")
+            if recorded_at:
+                task_event(job_id, "录制时间", "已从" + RECORDED_SOURCE_LABELS.get(recorded_source, "文件") + "识别录制时间")
             return {"id": job_id}
         except BaseException:
             target.unlink(missing_ok=True)
             raise
         finally:
             await file.close()
+
+
+def clean_name(value):
+    if not isinstance(value, str):
+        raise HTTPException(400, "名称格式不正确")
+    name = re.sub(r"[\x00-\x1f\x7f]", "", value).replace("/", "／").replace("\\", "＼").strip()
+    if not name:
+        raise HTTPException(400, "名称不能为空")
+    if len(name) > 180:
+        raise HTTPException(400, "名称最长 180 个字")
+    return name
+
+
+@app.patch("/api/jobs/{job_id}")
+async def edit_job(job_id: str, request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "请求格式不正确")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "请求格式不正确")
+    fields = {}
+    if "name" in payload:
+        fields["name"] = clean_name(payload["name"])
+    if "recorded_at" in payload:
+        value = payload["recorded_at"]
+        if value is None:
+            fields["recorded_at"], fields["recorded_source"] = None, ""
+        else:
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not recording_time.plausible(float(value)):
+                raise HTTPException(400, "录制时间不正确")
+            fields["recorded_at"], fields["recorded_source"] = float(value), "manual"
+    if not fields:
+        raise HTTPException(400, "没有需要修改的内容")
+    with db() as conn:
+        cursor = conn.execute("UPDATE jobs SET " + ",".join(k + "=?" for k in fields) + " WHERE id=?", [*fields.values(), job_id])
+    if not cursor.rowcount:
+        raise HTTPException(404, "任务不存在或已过期")
+    if "name" in fields:
+        task_event(job_id, "改名", "记录名称已修改")
+    if "recorded_at" in fields:
+        task_event(job_id, "录制时间", "录制时间已手动修改" if fields["recorded_at"] else "录制时间已清除")
+    return {"ok": True, **fields}
 
 
 @app.get("/api/jobs/{job_id}")
@@ -869,6 +929,13 @@ def detail(job_id: str):
     return result
 
 
+def download_headers(job, fallback, label):
+    stem = re.sub(r"\.(m4a|mp3|wav|aac|ogg|opus|flac|amr|webm|mp4|3gp|wma)$", "", job["name"], flags=re.I)
+    stem = re.sub(r'[\x00-\x1f\x7f"\\/:*?<>|]', "_", stem).strip() or "录音"
+    disposition = 'attachment; filename="%s.txt"; filename*=UTF-8\'\'%s' % (fallback, quote(stem + "-" + label + ".txt"))
+    return {"Content-Disposition": disposition}
+
+
 @app.get("/api/jobs/{job_id}/text")
 def download(job_id: str, part: str = "original"):
     job = detail(job_id)
@@ -877,12 +944,12 @@ def download(job_id: str, part: str = "original"):
     if part == "refined":
         if job["corrected_status"] != "done" or not job["refined_text"]:
             raise HTTPException(409, "全文净化尚未完成")
-        return PlainTextResponse(job["refined_text"], headers={"Content-Disposition": 'attachment; filename="transcript-ai.txt"'})
+        return PlainTextResponse(job["refined_text"], headers=download_headers(job, "transcript-ai", "AI全文"))
     if part == "summary":
         if job["refine_status"] != "done" or not job["summary"]:
             raise HTTPException(409, "内容概要尚未生成")
-        return PlainTextResponse(job["summary"], headers={"Content-Disposition": 'attachment; filename="transcript-summary.txt"'})
-    return PlainTextResponse(job["text"], headers={"Content-Disposition": 'attachment; filename="transcript.txt"'})
+        return PlainTextResponse(job["summary"], headers=download_headers(job, "transcript-summary", "纪要"))
+    return PlainTextResponse(job["text"], headers=download_headers(job, "transcript", "原文"))
 
 
 @app.post("/api/jobs/{job_id}/cancel")
