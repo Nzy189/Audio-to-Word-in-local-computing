@@ -130,6 +130,7 @@ GPU 服务一次处理一个任务；未就绪、忙碌或空闲显存不足时 
 | --- | --- |
 | `service/app.py` | FastAPI、认证、SQLite、任务调度、本地 CPU、电脑地址设置（默认内置）、状态检测、事件日志、访问审计（未登录访问/登录尝试/退出，audit_log 表）、终止与清理、AI 提炼挂接与设置接口 |
 | `service/llm_refine.py` | AI 提炼客户端：OpenAI 兼容 API 调用、Key 掩码、超时与重试、结果解析（优化正文 + 要点概要） |
+| `service/recording_time.py` | 录制时间推断：音频元数据（ffmpeg -i 全局 Metadata）> 文件名日期 > 浏览器文件修改时间（贴近上传时刻的不采用） |
 | `service/remote_worker.py` | LAN 电脑客户端（无密钥）、分类型连接失败、流式发送、状态轮询、取消和结果确认 |
 | `service/index.html` | 手机适配单页：上传、电脑在线状态显示、地址修改、AI 提炼设置卡、历史、详情（AI 内容/原文双页签）、日志、终止、下载 |
 | `service/requirements.txt` | NAS/ECS Python 依赖版本固定 |
@@ -234,6 +235,7 @@ queued → remote_upload → remote_processing → done
 | `deploy/nas/verify-refine.py` | AI 提炼容器验证（`a`：无 env 默认与旧库迁移；`b`：stub 全链路，含两段时序、净化单独重试与双 409），需要隔离 QA 容器 |
 | `deploy/nas/browser-refine-check.cjs` | AI 设置卡、双页签、两段渲染与 usage 行、识别硬件行、概要复制/下载与手机 QA；会重置隔离 QA 的设置 |
 | `tests/test_llm_refine.py` | 提炼客户端单测（18 项：两相纯文本、usage 实测/估算、切段并行、段失败/重试、SSE 错误、进度与 ETA） |
+| `tests/test_recording_time.py` | 录制时间推断单测（27 项；本机有 ffmpeg 时含真实 m4a/wav 元数据读取） |
 | `deploy/ecs/run-qa.py` | 本地 ECS amd64 镜像 QA，创建随机名容器与 tmpfs 并自动清理；不可改为生产容器 |
 
 **不要把测试脚本中的 QA 容器名改成用户的生产容器直接执行。** 测试会上传/删除任务，部分还会重启容器、清空 QA 连接设置。应先阅读脚本中的固定端口、名称、路径和测试前置条件。
